@@ -1,14 +1,20 @@
 name: Module
+permissions:
+  contents: write
 on:
   push:
     paths-ignore:
       - '.github/ISSUE_TEMPLATE'
       - '**/README.md'
+    tags:
+      - '*'
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    if: ${{ !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    if: |
+      github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, '[skip ci]')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,3 +70,55 @@ jobs:
           path: |-
             "module/build/outputs/mapping/release"
             "ui/build/outputs/mapping/release"
+      - name: Delete old Nightly assets
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          OWNER="${{ github.repository_owner }}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          echo "Find nightly release..."
+          RELEASE_JSON=$(gh api repos/$OWNER/$REPO/releases/tags/nightly 2>/dev/null || true)
+          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Nightly release doesn't exist, skip deletion"
+            exit 0
+          fi
+
+          echo "Release ID: $RELEASE_ID"
+          echo "Get and delete all old assets (paginated)..."
+
+          ASSET_IDS=$(gh api --paginate repos/$OWNER/$REPO/releases/$RELEASE_ID/assets --jq '.[].id')
+
+          for ASSET_ID in $ASSET_IDS; do
+            echo "Delete asset $ASSET_ID"
+            gh api -X DELETE repos/$OWNER/$REPO/releases/assets/$ASSET_ID
+          done
+      - name: Update Nightly
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: true
+          overwrite: true
+          files: |
+            out/sui-*-release.zip
+            out/sui-*-debug.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: false
+          prerelease: false
+          files: |
+            out/sui-*-release.zip
+            out/sui-*-debug.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
