@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dev
     paths-ignore:
       - '.github/ISSUE_TEMPLATE'
       - '**/README.md'
@@ -13,7 +14,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
   workflow_dispatch:
 jobs:
   build:
@@ -64,20 +64,20 @@ jobs:
         if: success()
         id: prepareArtifact
         run: |
-          releaseName=`ls out/sui-*-release.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=releaseName::$releaseName"
-          debugName=`ls out/sui-*-debug.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=debugName::$debugName"
-          unzip out/sui-*-release.zip -d sui-release
-          unzip out/sui-*-debug.zip -d sui-debug
+          releaseName=`ls out/Sui-*-release.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=releaseName::$releaseName"
+          debugName=`ls out/Sui-*-debug.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=debugName::$debugName"
+          unzip out/Sui-*-release.zip -d Sui-release
+          unzip out/Sui-*-debug.zip -d Sui-debug
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.prepareArtifact.outputs.releaseName }}
-          path: './sui-release/*'
+          path: './Sui-release/*'
       - name: Upload debug
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.prepareArtifact.outputs.debugName }}
-          path: './sui-debug/*'
+          path: './Sui-debug/*'
       - name: Upload mappings
         uses: actions/upload-artifact@v4
         with:
@@ -133,8 +133,8 @@ jobs:
           prerelease: false
           overwrite: true
           files: |
-            out/sui-*-release.zip
-            out/sui-*-debug.zip
+            out/Sui-*-release.zip
+            out/Sui-*-debug.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Release
@@ -144,8 +144,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            out/sui-*-release.zip
-            out/sui-*-debug.zip
+            out/Sui-*-release.zip
+            out/Sui-*-debug.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Get commit count
@@ -162,8 +162,8 @@ jobs:
 
           VERSION_CODE="${{ steps.commit_count.outputs.count }}"
 
-          RELEASE_ZIP=$(ls out/sui-*-release.zip | head -n1)
-          VERSION=$(echo "$RELEASE_ZIP" | sed -E 's/.*sui-(v[^_]+)_.*/\1/')
+          RELEASE_ZIP=$(ls out/Sui-*-release.zip | head -n1)
+          VERSION=$(echo "$RELEASE_ZIP" | sed -E 's/.*Sui-(v[^_]+)_.*/\1/')
           ZIP_NAME=$(basename "$RELEASE_ZIP")
 
           ZIP_URL="https://github.com/${{ github.repository }}/releases/download/nightly/${ZIP_NAME}"
