@@ -158,9 +158,10 @@ class ManagementAppItemViewHolder(
         val explicitFlags = data.flags and SuiConfig.MASK_PERMISSION
         val currentSelection = when {
             explicitFlags and SuiConfig.FLAG_ALLOWED != 0 -> 0
-            explicitFlags and SuiConfig.FLAG_DENIED != 0 -> 1
-            explicitFlags and SuiConfig.FLAG_HIDDEN != 0 -> 2
-            else -> 3
+            explicitFlags and SuiConfig.FLAG_ALLOWED_SHELL != 0 -> 1
+            explicitFlags and SuiConfig.FLAG_DENIED != 0 -> 2
+            explicitFlags and SuiConfig.FLAG_HIDDEN != 0 -> 3
+            else -> 4
         }
 
         val menu = popupMenu.menu
@@ -171,6 +172,7 @@ class ManagementAppItemViewHolder(
         popupMenu.setOnMenuItemClickListener { item ->
             val newValue = when (item.itemId) {
                 R.id.action_allow -> SuiConfig.FLAG_ALLOWED
+                R.id.action_allow_shell -> SuiConfig.FLAG_ALLOWED_SHELL
                 R.id.action_deny -> SuiConfig.FLAG_DENIED
                 R.id.action_hidden -> SuiConfig.FLAG_HIDDEN
                 R.id.action_default -> 0
@@ -234,10 +236,11 @@ class ManagementAppItemViewHolder(
                 data.defaultFlags and SuiConfig.MASK_PERMISSION
             }
         val allowed = effectiveFlags and SuiConfig.FLAG_ALLOWED != 0
+        val allowedShell = effectiveFlags and SuiConfig.FLAG_ALLOWED_SHELL != 0
         val denied = effectiveFlags and SuiConfig.FLAG_DENIED != 0
         val hidden = effectiveFlags and SuiConfig.FLAG_HIDDEN != 0
 
-        if (allowed) {
+        if (allowed || allowedShell) {
             binding.title.setTextColor(textColorPrimary)
             binding.title.typeface = SANS_SERIF_MEDIUM
         } else if (denied) {
@@ -252,17 +255,19 @@ class ManagementAppItemViewHolder(
         }
 
         val explicitAllowed = explicitFlags and SuiConfig.FLAG_ALLOWED != 0
+        val explicitAllowedShell = explicitFlags and SuiConfig.FLAG_ALLOWED_SHELL != 0
         val explicitDenied = explicitFlags and SuiConfig.FLAG_DENIED != 0
         val explicitHidden = explicitFlags and SuiConfig.FLAG_HIDDEN != 0
 
         val textRes = when {
             explicitAllowed -> R.string.permission_allowed
+            explicitAllowedShell -> R.string.permission_allowed_shell
             explicitDenied -> R.string.permission_denied
             explicitHidden -> R.string.permission_hidden
             else -> R.string.permission_default
         }
 
-        if (explicitAllowed) {
+        if (explicitAllowed || explicitAllowedShell) {
             statusText.setTextColor(context.theme.resolveColor(androidx.appcompat.R.attr.colorAccent))
         } else if (explicitDenied) {
             val isNight = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_YES != 0

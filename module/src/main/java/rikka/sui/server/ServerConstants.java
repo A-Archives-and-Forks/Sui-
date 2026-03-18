@@ -34,4 +34,5 @@ public class ServerConstants {
     public static final int BINDER_TRANSACTION_setGlobalSettings = 10007;
     public static final int BINDER_TRANSACTION_getGlobalSettings = 10008;
     public static final int BINDER_TRANSACTION_getShortcutToken = 10009;
+    public static final int BINDER_TRANSACTION_requestPermissionFromShell = 10010;
 }

@@ -43,4 +43,12 @@ public class Bridge {
     public static boolean isHidden(int uid) {
         return SystemProcess.isHidden(uid);
     }
+
+    public static boolean isRootAllowed(int uid) {
+        return SystemProcess.isRootAllowed(uid);
+    }
+
+    public static boolean isShellAllowed(int uid) {
+        return SystemProcess.isShellAllowed(uid);
+    }
 }

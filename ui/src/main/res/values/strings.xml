@@ -21,14 +21,16 @@
 <resources>
     <string name="permission_warning_template"><![CDATA[Allow <b>%1$s</b> to %2$s?]]></string>
     <string name="permission_description">have the full access of the device</string>
-    <string name="grant_dialog_button_allow_always">Allow all the time</string>
-    <string name="grant_dialog_button_allow_one_time">Only this time</string>
+    <string name="grant_dialog_button_allow_always">Always (root)</string>
+    <string name="grant_dialog_button_allow_always_shell">Always (Shell)</string>
+    <string name="grant_dialog_button_allow_one_time">Only this time (root)</string>
     <string name="grant_dialog_button_deny">Deny</string>
     <string name="grant_dialog_button_deny_and_dont_ask_again">Deny, don\'t ask again</string>
     <string name="brackets_format">%1$s (%2$s)</string>
     <string name="management_title">Superuser management</string>
     <string name="close">Close</string>
     <string name="permission_allowed">Allowed</string>
+    <string name="permission_allowed_shell">Allowed (Shell)</string>
     <string name="permission_denied">Denied</string>
     <string name="permission_hidden">Hidden</string>
     <string name="permission_ask">Ask</string>

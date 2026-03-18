@@ -46,6 +46,7 @@ public class Starter {
         });
 
         String filesPath = null;
+        boolean isShell = false;
 
         for (String arg : args) {
             if (arg.equals("--debug")) {
@@ -53,6 +54,8 @@ public class Starter {
             } else if (arg.startsWith("--files-path=")) {
                 filesPath = arg.substring("--files-path=".length());
                 SuiUserServiceManager.setStartDex(filesPath + "/sui.dex");
+            } else if (arg.equals("--shell")) {
+                isShell = true;
             }
         }
 
@@ -63,6 +66,6 @@ public class Starter {
         waitSystemService(Context.USER_SERVICE);
         waitSystemService(Context.APP_OPS_SERVICE);
 
-        SuiService.main(filesPath);
+        SuiService.main(filesPath, isShell);
     }
 }

@@ -24,6 +24,9 @@
             android:id="@+id/batch_allow"
             android:title="@string/permission_allowed" />
         <item
+            android:id="@+id/batch_allow_shell"
+            android:title="@string/permission_allowed_shell" />
+        <item
             android:id="@+id/batch_deny"
             android:title="@string/permission_denied" />
         <item

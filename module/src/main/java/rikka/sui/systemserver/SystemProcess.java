@@ -33,6 +33,8 @@ public final class SystemProcess {
 
     private static final BridgeService SERVICE = new BridgeService();
     private static volatile int[] hiddenUids = new int[0];
+    private static volatile int[] rootUids = new int[0];
+    private static volatile int[] shellUids = new int[0];
 
     private static boolean execActivityTransaction(
             @NonNull Binder binder, int code, Parcel data, Parcel reply, int flags) {
@@ -80,12 +82,14 @@ public final class SystemProcess {
     public static void main(String[] args) {
         LOGGER.d("main: %s", Arrays.toString(args));
 
+        // Note: IShizukuService only provides getHiddenUids().
+        // Root and shell UIDs will be pushed shortly by SuiService via ACTION_SYNC_UIDS.
         try {
             moe.shizuku.server.IShizukuService service = BridgeService.get();
             if (service != null) {
                 int[] uids = service.getHiddenUids();
                 LOGGER.d("syncing %d hidden uids to native and Java cache", uids.length);
-                updateHiddenUids(uids);
+                updateUids(uids, new int[0], new int[0]);
             } else {
                 LOGGER.w("IShizukuService is null in SystemProcess.main");
             }
@@ -94,16 +98,35 @@ public final class SystemProcess {
         }
     }
 
-    public static void updateHiddenUids(int[] uids) {
-        if (uids == null) uids = new int[0];
-        Arrays.sort(uids);
-        hiddenUids = uids;
-        LOGGER.d("syncing %d hidden uids to native", uids.length);
-        setHiddenUids(uids);
+    public static void updateUids(int[] hidden, int[] root, int[] shell) {
+        if (hidden == null) hidden = new int[0];
+        if (root == null) root = new int[0];
+        if (shell == null) shell = new int[0];
+
+        Arrays.sort(hidden);
+        Arrays.sort(root);
+        Arrays.sort(shell);
+
+        hiddenUids = hidden;
+        rootUids = root;
+        shellUids = shell;
+
+        LOGGER.d("syncing %d hidden, %d root, %d shell uids to native", hidden.length, root.length, shell.length);
+        setHiddenUids(hidden);
     }
 
     public static boolean isHidden(int uid) {
         int[] uids = hiddenUids;
+        return Arrays.binarySearch(uids, uid) >= 0;
+    }
+
+    public static boolean isRootAllowed(int uid) {
+        int[] uids = rootUids;
+        return Arrays.binarySearch(uids, uid) >= 0;
+    }
+
+    public static boolean isShellAllowed(int uid) {
+        int[] uids = shellUids;
         return Arrays.binarySearch(uids, uid) >= 0;
     }
 

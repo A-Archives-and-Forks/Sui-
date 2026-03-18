@@ -39,7 +39,7 @@ public class BridgeServiceClient {
     private static final int ACTION_SEND_BINDER = 1;
     private static final int ACTION_GET_BINDER = ACTION_SEND_BINDER + 1;
     private static final int ACTION_NOTIFY_FINISHED = ACTION_SEND_BINDER + 2;
-    private static final int ACTION_SYNC_HIDDEN_UIDS = ACTION_SEND_BINDER + 3;
+    private static final int ACTION_SYNC_UIDS = ACTION_SEND_BINDER + 3;
 
     private static final int MAX_ZYGOTE_RESTART = 1;
     private static int remainingRestart = MAX_ZYGOTE_RESTART;
@@ -214,7 +214,7 @@ public class BridgeServiceClient {
         }
     }
 
-    public static void syncHiddenUids(int[] uids) {
+    public static void syncUids(int[] hiddenUids, int[] rootUids, int[] shellUids) {
         IBinder bridgeService = ServiceManager.getService(BRIDGE_SERVICE_NAME);
         if (bridgeService == null) {
             return;
@@ -224,12 +224,14 @@ public class BridgeServiceClient {
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(BRIDGE_SERVICE_DESCRIPTOR);
-            data.writeInt(ACTION_SYNC_HIDDEN_UIDS);
-            data.writeIntArray(uids);
+            data.writeInt(ACTION_SYNC_UIDS);
+            data.writeIntArray(hiddenUids);
+            data.writeIntArray(rootUids);
+            data.writeIntArray(shellUids);
             bridgeService.transact(BRIDGE_TRANSACTION_CODE, data, reply, 0);
             reply.readException();
         } catch (Throwable e) {
-            LOGGER.e(e, "sync hidden uids");
+            LOGGER.e(e, "sync uids");
         } finally {
             data.recycle();
             reply.recycle();

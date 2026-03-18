@@ -31,7 +31,7 @@
 #endif
 
 void app_process(const char* dex_path, const char* files_path, const char* main_class,
-                 const char* process_name) {
+                 const char* process_name, const char* extra_arg) {
     if (setenv("CLASSPATH", dex_path, true)) {
         LOGE("can't set CLASSPATH");
         exit(EXIT_FAILURE);
@@ -91,6 +91,9 @@ void app_process(const char* dex_path, const char* files_path, const char* main_
     ARG_PUSH(argv, main_class)
     ARG_PUSH_DEBUG_ONLY(argv, "--debug")
     ARG_PUSH_FMT(argv, "--files-path=%s", files_path)
+    if (extra_arg != nullptr) {
+        ARG_PUSH(argv, extra_arg)
+    }
     ARG_END(argv)
 
     LOGI("exec app_process...");

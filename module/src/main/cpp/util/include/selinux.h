@@ -8,5 +8,6 @@ int setfilecon_raw(const char* path, const char* context);
 int selinux_check_access(const char* scon, const char* tcon, const char* tclass, const char* perm,
                          void* auditdata);
 int getcon(char** con);
+int setcon(const char* con);
 
 #endif  // _SELINUX_H

@@ -26,6 +26,7 @@
 #include <misc.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <selinux.h>
 
 /*
  * argv[1]: path of the module, such as /data/adb/modules/zygisk-sui
@@ -65,7 +66,66 @@ static int sui_main(int argc, char** argv) {
     strcpy(dex_path, root_path);
     strcat(dex_path, "/sui.dex");
 
-    app_process(dex_path, root_path, "rikka.sui.server.Starter", "sui");
+    pid_t pid = fork();
+    if (pid < 0) {
+        PLOGE("fork");
+        return EXIT_FAILURE;
+    }
+
+    if (pid == 0) {
+        // Child process -> Shell Server
+        // uid 2000 cannot read /data/adb/modules/zygisk-sui/sui.dex or .so libraries
+        const char* shell_dir = "/data/local/tmp/sui_shell";
+        mkdir(shell_dir, 0755);
+        chown(shell_dir, 2000, 2000);
+
+        char shell_dex_path[] = "/data/local/tmp/sui_shell/sui.dex";
+        if (copyfile(dex_path, shell_dex_path) == 0) {
+            chmod(shell_dex_path, 0644);
+            chown(shell_dex_path, 2000, 2000);
+        }
+
+        char lib_path[PATH_MAX];
+        snprintf(lib_path, PATH_MAX, "%s/librish.so", root_path);
+        char shell_lib_path[] = "/data/local/tmp/sui_shell/librish.so";
+        if (copyfile(lib_path, shell_lib_path) == 0) {
+            chmod(shell_lib_path, 0644);
+            chown(shell_lib_path, 2000, 2000);
+        }
+
+        char libsui_path[PATH_MAX];
+        snprintf(libsui_path, PATH_MAX, "%s/libsui.so", root_path);
+        char shell_libsui_path[] = "/data/local/tmp/sui_shell/libsui.so";
+        if (copyfile(libsui_path, shell_libsui_path) == 0) {
+            chmod(shell_libsui_path, 0644);
+            chown(shell_libsui_path, 2000, 2000);
+        }
+
+        // Set SELinux context to shell BEFORE dropping UID/GID (requires root privileges)
+        if (setcon("u:r:shell:s0") != 0) {
+            PLOGE("setcon u:r:shell:s0");
+            exit(EXIT_FAILURE);
+        }
+
+        // Set GID to shell (2000)
+        if (setresgid(2000, 2000, 2000) != 0) {
+            PLOGE("setresgid 2000");
+            exit(EXIT_FAILURE);
+        }
+
+        // Set UID to shell (2000)
+        if (setresuid(2000, 2000, 2000) != 0) {
+            PLOGE("setresuid 2000");
+            exit(EXIT_FAILURE);
+        }
+
+        app_process(shell_dex_path, shell_dir, "rikka.sui.server.Starter", "sui_shell", "--shell");
+        exit(EXIT_FAILURE);
+    } else {
+        // Parent process -> Root Server
+        app_process(dex_path, root_path, "rikka.sui.server.Starter", "sui");
+        exit(EXIT_FAILURE);
+    }
 
     return EXIT_SUCCESS;
 }

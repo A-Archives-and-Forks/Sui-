@@ -374,6 +374,7 @@ class ManagementFragment : AppFragment() {
 
             val isSelected = when (item.itemId) {
                 R.id.batch_allow -> currentDefaultMode == SuiConfig.FLAG_ALLOWED
+                R.id.batch_allow_shell -> currentDefaultMode == SuiConfig.FLAG_ALLOWED_SHELL
                 R.id.batch_deny -> currentDefaultMode == SuiConfig.FLAG_DENIED
                 R.id.batch_hidden -> currentDefaultMode == SuiConfig.FLAG_HIDDEN
                 R.id.batch_ask -> currentDefaultMode == 0
@@ -401,6 +402,7 @@ class ManagementFragment : AppFragment() {
         popupMenu.setOnMenuItemClickListener { item ->
             val targetMode = when (item.itemId) {
                 R.id.batch_allow -> SuiConfig.FLAG_ALLOWED
+                R.id.batch_allow_shell -> SuiConfig.FLAG_ALLOWED_SHELL
                 R.id.batch_deny -> SuiConfig.FLAG_DENIED
                 R.id.batch_hidden -> SuiConfig.FLAG_HIDDEN
                 R.id.batch_ask -> 0

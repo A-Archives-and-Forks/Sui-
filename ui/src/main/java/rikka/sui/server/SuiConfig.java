@@ -24,5 +24,6 @@ public class SuiConfig {
     public static final int FLAG_ALLOWED = 1 << 1;
     public static final int FLAG_DENIED = 1 << 2;
     public static final int FLAG_HIDDEN = 1 << 3;
-    public static final int MASK_PERMISSION = FLAG_ALLOWED | FLAG_DENIED | FLAG_HIDDEN;
+    public static final int FLAG_ALLOWED_SHELL = 1 << 4;
+    public static final int MASK_PERMISSION = FLAG_ALLOWED | FLAG_DENIED | FLAG_HIDDEN | FLAG_ALLOWED_SHELL;
 }

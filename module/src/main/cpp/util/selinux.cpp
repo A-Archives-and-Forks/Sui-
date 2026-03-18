@@ -72,8 +72,10 @@ int setfilecon_raw(const char* path, const char* context) {
 
 using selinux_check_access_t = int(const char*, const char*, const char*, const char*, void*);
 using getcon_t = int(char**);
+using setcon_t = int(const char*);
 selinux_check_access_t* selinux_check_access_func = nullptr;
 getcon_t* getcon_func = nullptr;
+setcon_t* setcon_func = nullptr;
 
 int selinux_check_access(const char* scon, const char* tcon, const char* tclass, const char* perm,
                          void* auditdata) {
@@ -86,6 +88,13 @@ int selinux_check_access(const char* scon, const char* tcon, const char* tclass,
 int getcon(char** con) {
     if (getcon_func) {
         return getcon_func(con);
+    }
+    return 0;
+}
+
+int setcon(const char* con) {
+    if (setcon_func) {
+        return setcon_func(con);
     }
     return 0;
 }
@@ -107,5 +116,6 @@ bool init_selinux() {
 
     selinux_check_access_func = (selinux_check_access_t*)dlsym(handle, "selinux_check_access");
     getcon_func = (getcon_t*)dlsym(handle, "getcon");
+    setcon_func = (setcon_t*)dlsym(handle, "setcon");
     return selinux_check_access_func != nullptr && getcon_func != nullptr;
 }

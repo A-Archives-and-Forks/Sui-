@@ -21,7 +21,7 @@
 #define APP_PROCESS_H
 
 void app_process(const char* dex_path, const char* files_path, const char* main_class,
-                 const char* process_name);
+                 const char* process_name, const char* extra_arg = nullptr);
 
 void wait_for_zygote();
 

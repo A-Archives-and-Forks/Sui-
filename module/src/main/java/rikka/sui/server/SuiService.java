@@ -32,12 +32,8 @@ import static rikka.shizuku.ShizukuApiConstants.REQUEST_PERMISSION_REPLY_IS_ONET
 
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageInfoHidden;
-import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Binder;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -47,20 +43,16 @@ import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.system.ErrnoException;
 import android.system.Os;
-import android.util.ArrayMap;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
-import dev.rikka.tools.refine.Refine;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import moe.shizuku.server.IShizukuApplication;
 import rikka.hidden.compat.ActivityManagerApis;
 import rikka.hidden.compat.PackageManagerApis;
-import rikka.hidden.compat.UserManagerApis;
 import rikka.parcelablelist.ParcelableListSlice;
 import rikka.rish.RishConfig;
 import rikka.shizuku.ShizukuApiConstants;
@@ -69,8 +61,8 @@ import rikka.shizuku.server.Service;
 import rikka.shizuku.server.util.HandlerUtil;
 import rikka.sui.model.AppInfo;
 import rikka.sui.server.bridge.BridgeServiceClient;
+import rikka.sui.util.AppLaunchUtils;
 import rikka.sui.util.Logger;
-import rikka.sui.util.MapUtil;
 import rikka.sui.util.OsUtils;
 import rikka.sui.util.UserHandleCompat;
 
@@ -80,17 +72,25 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
 
     private static SuiService instance;
     private static String filesPath;
+    private static boolean shellMode = false;
+    private final Map<String, android.os.IBinder> delegatedPermissionCallbacks =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public static SuiService getInstance() {
         return instance;
     }
 
-    public static void main(String filesPath) {
-        LOGGER.i("starting server...");
+    public static boolean isShellMode() {
+        return shellMode;
+    }
+
+    public static void main(String filesPath, boolean isShell) {
+        LOGGER.i("starting server (isShell=%b)...", isShell);
 
         RishConfig.setLibraryPath(System.getProperty("sui.library.path"));
 
         SuiService.filesPath = filesPath;
+        SuiService.shellMode = isShell;
 
         Looper.prepareMainLooper();
         new SuiService();
@@ -138,6 +138,16 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         return uid;
     }
 
+    private int[] getRootUidsWithSystem() {
+        int[] rootUids = configManager.getRootUids();
+        int[] result = new int[rootUids.length + 3];
+        System.arraycopy(rootUids, 0, result, 0, rootUids.length);
+        result[rootUids.length] = systemUiUid;
+        result[rootUids.length + 1] = settingsUid;
+        result[rootUids.length + 2] = 1000;
+        return result;
+    }
+
     private final Runnable registerTask = new Runnable() {
         @Override
         public void run() {
@@ -152,7 +162,15 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
                 public void onResponseFromBridgeService(boolean response) {
                     if (response) {
                         LOGGER.i("SUCCESS: Service binder sent to bridge.");
-                        BridgeServiceClient.syncHiddenUids(configManager.getHiddenUids());
+                        // Only the root server manages UID lists.
+                        // The shell server must NOT call syncUids, or it would overwrite
+                        // the root server's rootUids/shellUids with its empty config.
+                        if (!shellMode) {
+                            BridgeServiceClient.syncUids(
+                                    configManager.getHiddenUids(),
+                                    getRootUidsWithSystem(),
+                                    configManager.getShellUids());
+                        }
                     } else {
                         LOGGER.w("FAILURE: No response from bridge. Retrying in 1s...");
                         // dumpSuiProcess();
@@ -177,9 +195,12 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         systemUiUid = waitForPackage(MANAGER_APPLICATION_ID, true);
         settingsUid = waitForPackage(SETTINGS_APPLICATION_ID, true);
 
-        int gmsUid = waitForPackage("com.google.android.gms", false);
-        if (gmsUid > 0) {
-            configManager.update(gmsUid, SuiConfig.MASK_PERMISSION, SuiConfig.FLAG_HIDDEN);
+        // Skip root-only setup when running as shell server
+        if (!shellMode) {
+            int gmsUid = waitForPackage("com.google.android.gms", false);
+            if (gmsUid > 0) {
+                configManager.update(gmsUid, SuiConfig.MASK_PERMISSION, SuiConfig.FLAG_HIDDEN);
+            }
         }
 
         mainHandler.postDelayed(registerTask, 2000);
@@ -211,7 +232,7 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         // Temporary fix for https://github.com/RikkaApps/Sui/issues/35
         if ("transactRemote".equals(func)) {
             SuiConfig.PackageEntry packageEntry = configManager.find(callingUid);
-            return packageEntry != null && packageEntry.isAllowed();
+            return packageEntry != null && (packageEntry.isAllowed() || packageEntry.isAllowedShell());
         }
         return false;
     }
@@ -326,6 +347,10 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             } catch (Throwable e) {
                 LOGGER.w(e, "showPermissionConfirmation");
             }
+        } else if (shellMode) {
+            LOGGER.i("Delegating showPermissionConfirmation to root server");
+            RootBridgeDelegate.delegatePermissionConfirmationToRoot(
+                    clientManager, requestCode, clientRecord.packageName, callingUid, callingPid);
         } else {
             LOGGER.e("manager is null");
         }
@@ -368,10 +393,16 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
 
         boolean allowed = data.getBoolean(REQUEST_PERMISSION_REPLY_ALLOWED);
         boolean onetime = data.getBoolean(REQUEST_PERMISSION_REPLY_IS_ONETIME);
+        boolean isShell = data.getBoolean(ShizukuApiConstants.REQUEST_PERMISSION_REPLY_IS_SHELL);
 
         LOGGER.i(
-                "dispatchPermissionConfirmationResult: uid=%d, pid=%d, requestCode=%d, allowed=%s, onetime=%s",
-                requestUid, requestPid, requestCode, Boolean.toString(allowed), Boolean.toString(onetime));
+                "dispatchPermissionConfirmationResult: uid=%d, pid=%d, requestCode=%d, allowed=%s, onetime=%s, isShell=%s",
+                requestUid,
+                requestPid,
+                requestCode,
+                Boolean.toString(allowed),
+                Boolean.toString(onetime),
+                Boolean.toString(isShell));
 
         List<ClientRecord> records = clientManager.findClients(requestUid);
         if (records.isEmpty()) {
@@ -385,9 +416,55 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             }
         }
 
+        String key = requestUid + ":" + requestPid;
+        android.os.IBinder callback = delegatedPermissionCallbacks.remove(key);
+        if (callback != null) {
+            try {
+                android.os.Parcel cbData = android.os.Parcel.obtain();
+                cbData.writeInt(allowed ? 1 : 0);
+                callback.transact(1, cbData, null, android.os.IBinder.FLAG_ONEWAY);
+                cbData.recycle();
+            } catch (Throwable e) {
+                LOGGER.w(e, "Failed to call delegated permission callback");
+            }
+        }
+
         if (!onetime) {
-            configManager.update(
-                    requestUid, SuiConfig.MASK_PERMISSION, allowed ? SuiConfig.FLAG_ALLOWED : SuiConfig.FLAG_DENIED);
+            int flag =
+                    allowed ? (isShell ? SuiConfig.FLAG_ALLOWED_SHELL : SuiConfig.FLAG_ALLOWED) : SuiConfig.FLAG_DENIED;
+            configManager.update(requestUid, SuiConfig.MASK_PERMISSION, flag);
+
+            // Push updated UID lists to system_server so BridgeService routes correctly
+            if (!shellMode) {
+                BridgeServiceClient.syncUids(
+                        configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
+            }
+
+            // Force kill the app if it requested permission and was granted Shell.
+            // When an unconfigured app requests a binder, it drops into the root binder by fallback.
+            // If the user grants shell, we must kill the app so its next startup acquires the true shell binder.
+            if (isShell) {
+                for (ClientRecord record : records) {
+                    if (record.packageName != null) {
+                        try {
+                            LOGGER.i("Force stopping and restarting %s to re-acquire shell binder", record.packageName);
+                            long id = android.os.Binder.clearCallingIdentity();
+                            try {
+                                ActivityManagerApis.forceStopPackageNoThrow(
+                                        record.packageName, UserHandleCompat.getUserId(requestUid));
+                                getUserServiceManager().removeUserServicesForPackage(record.packageName);
+                                LOGGER.i("Auto-restarting %s dynamically", record.packageName);
+                                AppLaunchUtils.startAppAsUser(
+                                        record.packageName, UserHandleCompat.getUserId(requestUid));
+                            } finally {
+                                android.os.Binder.restoreCallingIdentity(id);
+                            }
+                        } catch (Throwable e) {
+                            LOGGER.w(e, "Failed to force stop/restart package %s", record.packageName);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -431,20 +508,34 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             if (newEffectiveEntry != null) {
                 newEffectiveFlags = newEffectiveEntry.flags & SuiConfig.MASK_PERMISSION;
             }
-            boolean allowed = (newEffectiveFlags & SuiConfig.FLAG_ALLOWED) != 0;
+            boolean allowed = (newEffectiveFlags & (SuiConfig.FLAG_ALLOWED | SuiConfig.FLAG_ALLOWED_SHELL)) != 0;
             for (ClientRecord record : clientManager.findClients(uid)) {
                 record.allowed = allowed;
+            }
 
-                if (!allowed || wasHidden) {
-                    ActivityManagerApis.forceStopPackageNoThrow(
-                            record.packageName, UserHandleCompat.getUserId(record.uid));
-                    getUserServiceManager().removeUserServicesForPackage(record.packageName);
+            if (newEffectiveFlags != oldEffectiveFlags) {
+                long id = android.os.Binder.clearCallingIdentity();
+                try {
+                    List<String> packages = PackageManagerApis.getPackagesForUidNoThrow(uid);
+                    for (String packageName : packages) {
+                        try {
+                            LOGGER.i(
+                                    "Permission changed for %s (uid %d), force stopping to sever old binders...",
+                                    packageName, uid);
+                            ActivityManagerApis.forceStopPackageNoThrow(packageName, UserHandleCompat.getUserId(uid));
+                            getUserServiceManager().removeUserServicesForPackage(packageName);
+                        } catch (Throwable e) {
+                            LOGGER.w(e, "Failed to force stop package %s", packageName);
+                        }
+                    }
+                } finally {
+                    android.os.Binder.restoreCallingIdentity(id);
                 }
             }
 
-            if ((mask & SuiConfig.FLAG_HIDDEN) != 0) {
-                BridgeServiceClient.syncHiddenUids(configManager.getHiddenUids());
-            }
+            // Always sync UIDs to system_server when permission flags change
+            BridgeServiceClient.syncUids(
+                    configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
         }
     }
 
@@ -464,7 +555,8 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         if (Intent.ACTION_PACKAGE_REMOVED.equals(action) && uid > 0 & !replacing) {
             LOGGER.i("uid %d is removed", uid);
             configManager.remove(uid);
-            BridgeServiceClient.syncHiddenUids(configManager.getHiddenUids());
+            BridgeServiceClient.syncUids(
+                    configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
         } else if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(action) && !replacing) {
             Uri uri = intent.getData();
             String packageName = (uri != null) ? uri.getSchemeSpecificPart() : null;
@@ -476,101 +568,7 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
 
     private ParcelableListSlice<AppInfo> getApplications(int userId, boolean onlyShizuku) {
         enforceManagerPermission("getApplications");
-
-        int defaultPermissionFlags = configManager.getDefaultPermissionFlags();
-        List<Integer> users = new ArrayList<>();
-        if (userId == -1) {
-            users.addAll(UserManagerApis.getUserIdsNoThrow());
-        } else {
-            users.add(userId);
-        }
-
-        Map<String, Boolean> existenceCache = new ArrayMap<>();
-        Map<String, Boolean> hasComponentsCache = new ArrayMap<>();
-
-        List<AppInfo> list = new ArrayList<>();
-        int installedBaseFlags = 0x00002000 /*MATCH_UNINSTALLED_PACKAGES*/ | PackageManager.GET_PERMISSIONS;
-        for (int user : users) {
-            for (PackageInfo pi : PackageManagerApis.getInstalledPackagesNoThrow(installedBaseFlags, user)) {
-                try {
-                    if (pi.applicationInfo == null
-                            || Refine.<PackageInfoHidden>unsafeCast(pi).overlayTarget != null
-                            || (pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) == 0) continue;
-
-                    int uid = pi.applicationInfo.uid;
-
-                    if (onlyShizuku) {
-                        boolean explicitlyAllowed = false;
-                        SuiConfig.PackageEntry explicitEntry = configManager.findExplicit(uid);
-                        if (explicitEntry != null && explicitEntry.isAllowed()) {
-                            explicitlyAllowed = true;
-                        }
-
-                        if (!explicitlyAllowed) {
-                            if (pi.requestedPermissions == null) continue;
-                            boolean requested = false;
-                            for (String p : pi.requestedPermissions) {
-                                if ("moe.shizuku.manager.permission.API_V23".equals(p)) {
-                                    requested = true;
-                                    break;
-                                }
-                            }
-                            if (!requested) continue;
-                        }
-                    }
-                    int appId = UserHandleCompat.getAppId(uid);
-                    if (uid == systemUiUid) continue;
-
-                    int flags = getFlagsForUidInternal(uid, SuiConfig.MASK_PERMISSION);
-                    if (flags == 0 && uid != 2000 && appId < 10000) continue;
-
-                    if (flags == 0) {
-                        String dataDir;
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            dataDir = pi.applicationInfo.deviceProtectedDataDir;
-                        } else {
-                            dataDir = pi.applicationInfo.dataDir;
-                        }
-
-                        final String sourceDir = pi.applicationInfo.sourceDir;
-                        boolean hasApk = sourceDir != null
-                                && MapUtil.getOrPut(existenceCache, sourceDir, () -> new File(sourceDir).exists());
-                        boolean hasData = dataDir != null
-                                && MapUtil.getOrPut(existenceCache, dataDir, () -> new File(dataDir).exists());
-
-                        // Installed (or hidden): hasApk && hasData
-                        // Uninstalled but keep data: !hasApk && hasData
-                        // Installed in other users only: hasApk && !hasData
-                        if (!(hasApk && hasData)) {
-                            LOGGER.v(
-                                    "skip %d:%s: hasApk=%s, hasData=%s",
-                                    user, pi.packageName, Boolean.toString(hasApk), Boolean.toString(hasData));
-                            continue;
-                        }
-
-                        // Removed the cumbersome hasComponents check.
-                        // This check required fetching activity/services/providers/receiver for each application,
-                        // This resulted in excessive Binder requests, slow loading, and ultimately, a
-                        // DeadObjectException (server crash).
-                        // Now relies on FLAG_HAS_CODE and other basic checks.
-                    }
-
-                    pi.activities = null;
-                    pi.receivers = null;
-                    pi.services = null;
-                    pi.providers = null;
-
-                    AppInfo item = new AppInfo();
-                    item.packageInfo = pi;
-                    item.flags = flags;
-                    item.defaultFlags = defaultPermissionFlags;
-                    list.add(item);
-                } catch (Throwable e) {
-                    LOGGER.w(e, "Error processing package %d %s", user, pi.packageName);
-                }
-            }
-        }
-        return new ParcelableListSlice<>(list);
+        return AppListBuilder.build(configManager, systemUiUid, userId, onlyShizuku);
     }
 
     private void showManagement() {
@@ -733,6 +731,22 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
                 LOGGER.w(e, "getShortcutToken");
                 reply.writeException(new RuntimeException("Failed to get shortcut token", e));
             }
+            return true;
+        }
+        if (code == ServerConstants.BINDER_TRANSACTION_requestPermissionFromShell) {
+            data.enforceInterface(ShizukuApiConstants.BINDER_DESCRIPTOR);
+            int requestCode = data.readInt();
+            String packageName = data.readString();
+            int reqUid = data.readInt();
+            int reqPid = data.readInt();
+            android.os.IBinder callback = data.readStrongBinder();
+
+            String key = reqUid + ":" + reqPid;
+            delegatedPermissionCallbacks.put(key, callback);
+
+            int userId = UserHandleCompat.getUserId(reqUid);
+            ClientRecord dummy = new ClientRecord(reqUid, reqPid, null, packageName, -1);
+            showPermissionConfirmation(requestCode, dummy, reqUid, reqPid, userId);
             return true;
         }
         return super.onTransact(code, data, reply, flags);

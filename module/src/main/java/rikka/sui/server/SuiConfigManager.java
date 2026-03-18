@@ -33,7 +33,75 @@ public class SuiConfigManager extends ConfigManager {
 
     public static final int DEFAULT_UID = -1;
 
+    private static android.os.FileObserver shellConfigObserver;
+
+    private void reloadShellConfigFromFile() {
+        try {
+            java.io.File file = new java.io.File("/data/local/tmp/sui_shell/sui_uids.txt");
+            if (!file.exists()) return;
+            try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(file))) {
+                String line;
+                synchronized (this) {
+                    config.packages.clear();
+                    while ((line = br.readLine()) != null) {
+                        String[] parts = line.split(":");
+                        if (parts.length == 2) {
+                            int uid = Integer.parseInt(parts[0]);
+                            int flags = Integer.parseInt(parts[1]);
+                            config.packages.add(new SuiConfig.PackageEntry(uid, flags));
+                        }
+                    }
+                }
+            }
+
+            // Update client states in memory
+            SuiService service = SuiService.getInstance();
+            if (service != null && service.getClientManager() != null) {
+                for (rikka.shizuku.server.ClientRecord record :
+                        service.getClientManager().getClients()) {
+                    SuiConfig.PackageEntry entry = find(record.uid);
+                    boolean allowed = entry != null
+                            && ((entry.flags & (SuiConfig.FLAG_ALLOWED | SuiConfig.FLAG_ALLOWED_SHELL)) != 0);
+                    record.allowed = allowed;
+                }
+            }
+            LOGGER.i("Shell server reloaded config, apps: " + config.packages.size());
+        } catch (Throwable e) {
+            LOGGER.e(e, "reload shell config");
+        }
+    }
+
+    private void syncUidsToShellFile() {
+        if (SuiService.isShellMode()) return;
+        try {
+            StringBuilder sb = new StringBuilder();
+            synchronized (this) {
+                for (SuiConfig.PackageEntry entry : config.packages) {
+                    sb.append(entry.uid).append(":").append(entry.flags).append("\n");
+                }
+            }
+            java.io.File dir = new java.io.File("/data/local/tmp/sui_shell");
+            if (!dir.exists()) dir.mkdirs();
+            java.io.File file = new java.io.File(dir, "sui_uids.txt");
+            java.io.File tempFile = new java.io.File(dir, "sui_uids.txt.tmp");
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile)) {
+                fos.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                fos.getFD().sync();
+                fos.close();
+                if (tempFile.renameTo(file)) {
+                    android.system.Os.chmod(file.getAbsolutePath(), 0644);
+                }
+            }
+        } catch (Throwable e) {
+            LOGGER.e(e, "sync uids to shell");
+        }
+    }
+
     public static SuiConfig load() {
+        if (SuiService.isShellMode()) {
+            LOGGER.i("SuiConfigManager: shell mode, starting with empty config and setting up FileObserver");
+            return new SuiConfig();
+        }
         SuiConfig config = SuiDatabase.readConfig();
         if (config == null) {
             LOGGER.e("SuiConfigManager: failed to read database, starting empty");
@@ -58,6 +126,26 @@ public class SuiConfigManager extends ConfigManager {
 
     public SuiConfigManager() {
         this.config = load();
+        if (SuiService.isShellMode()) {
+            reloadShellConfigFromFile();
+            if (shellConfigObserver == null) {
+                shellConfigObserver =
+                        new android.os.FileObserver(
+                                "/data/local/tmp/sui_shell/",
+                                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+                            @Override
+                            public void onEvent(int event, String path) {
+                                if ("sui_uids.txt".equals(path)) {
+                                    reloadShellConfigFromFile();
+                                }
+                            }
+                        };
+                shellConfigObserver.startWatching();
+            }
+        } else {
+            // Root server initial sync
+            syncUidsToShellFile();
+        }
     }
 
     public int getGlobalSettings() {
@@ -149,10 +237,11 @@ public class SuiConfigManager extends ConfigManager {
             }
         }
         if (needRemove) {
-            SuiDatabase.removeUid(uid);
+            if (!SuiService.isShellMode()) SuiDatabase.removeUid(uid);
         } else if (needUpdate) {
-            SuiDatabase.updateUid(uid, finalFlags);
+            if (!SuiService.isShellMode()) SuiDatabase.updateUid(uid, finalFlags);
         }
+        syncUidsToShellFile();
     }
 
     @Override
@@ -166,8 +255,9 @@ public class SuiConfigManager extends ConfigManager {
             }
         }
         if (needRemove) {
-            SuiDatabase.removeUid(uid);
+            if (!SuiService.isShellMode()) SuiDatabase.removeUid(uid);
         }
+        syncUidsToShellFile();
     }
 
     public boolean isHidden(int uid) {
@@ -203,6 +293,38 @@ public class SuiConfigManager extends ConfigManager {
             List<Integer> uids = new ArrayList<>();
             for (SuiConfig.PackageEntry entry : config.packages) {
                 if (entry.uid >= 10000 && (entry.flags & SuiConfig.FLAG_HIDDEN) != 0) {
+                    uids.add(entry.uid);
+                }
+            }
+            int[] res = new int[uids.size()];
+            for (int i = 0; i < uids.size(); i++) {
+                res[i] = uids.get(i);
+            }
+            return res;
+        }
+    }
+
+    public int[] getRootUids() {
+        synchronized (this) {
+            List<Integer> uids = new ArrayList<>();
+            for (SuiConfig.PackageEntry entry : config.packages) {
+                if (entry.uid >= 10000 && (entry.flags & SuiConfig.FLAG_ALLOWED) != 0) {
+                    uids.add(entry.uid);
+                }
+            }
+            int[] res = new int[uids.size()];
+            for (int i = 0; i < uids.size(); i++) {
+                res[i] = uids.get(i);
+            }
+            return res;
+        }
+    }
+
+    public int[] getShellUids() {
+        synchronized (this) {
+            List<Integer> uids = new ArrayList<>();
+            for (SuiConfig.PackageEntry entry : config.packages) {
+                if (entry.uid >= 10000 && (entry.flags & SuiConfig.FLAG_ALLOWED_SHELL) != 0) {
                     uids.add(entry.uid);
                 }
             }

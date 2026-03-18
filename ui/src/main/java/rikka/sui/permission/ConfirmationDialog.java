@@ -21,6 +21,7 @@ package rikka.sui.permission;
 
 import static rikka.shizuku.ShizukuApiConstants.REQUEST_PERMISSION_REPLY_ALLOWED;
 import static rikka.shizuku.ShizukuApiConstants.REQUEST_PERMISSION_REPLY_IS_ONETIME;
+import static rikka.shizuku.ShizukuApiConstants.REQUEST_PERMISSION_REPLY_IS_SHELL;
 
 import android.app.Application;
 import android.content.Context;
@@ -113,10 +114,12 @@ public class ConfirmationDialog {
         HandlerKt.getMainHandler().post(() -> showInternal(requestUid, requestPid, requestPackageName, requestCode));
     }
 
-    private void setResult(int requestUid, int requestPid, int requestCode, boolean allowed, boolean onetime) {
+    private void setResult(
+            int requestUid, int requestPid, int requestCode, boolean allowed, boolean onetime, boolean isShell) {
         Bundle data = new Bundle();
         data.putBoolean(REQUEST_PERMISSION_REPLY_ALLOWED, allowed);
         data.putBoolean(REQUEST_PERMISSION_REPLY_IS_ONETIME, onetime);
+        data.putBoolean(REQUEST_PERMISSION_REPLY_IS_SHELL, isShell);
 
         try {
             BridgeServiceClient.getService()
@@ -141,7 +144,7 @@ public class ConfirmationDialog {
 
             @Override
             public void onClose() {
-                setResult(requestUid, requestPid, requestCode, false, true);
+                setResult(requestUid, requestPid, requestCode, false, true, false);
             }
         };
         root.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -212,33 +215,41 @@ public class ConfirmationDialog {
                 resources.getString(R.string.permission_warning_template),
                 label,
                 resources.getString(R.string.permission_description))));
-        binding.button1.setText(resources.getString(R.string.grant_dialog_button_allow_always));
+        binding.button1Root.setText(resources.getString(R.string.grant_dialog_button_allow_always));
+        binding.button1Shell.setText(resources.getString(R.string.grant_dialog_button_allow_always_shell));
         binding.button2.setText(resources.getString(R.string.grant_dialog_button_allow_one_time));
         binding.button3.setText(resources.getString(R.string.grant_dialog_button_deny_and_dont_ask_again));
 
         ColorStateList buttonTextColor =
                 resources.getColorStateList(R.color.confirmation_dialog_button_text, context.getTheme());
-        binding.button1.setTextColor(buttonTextColor);
+        binding.button1Root.setTextColor(buttonTextColor);
+        binding.button1Shell.setTextColor(buttonTextColor);
         binding.button2.setTextColor(buttonTextColor);
         binding.button3.setTextColor(buttonTextColor);
 
-        binding.button1.setOnClickListener(v -> {
+        binding.button1Root.setOnClickListener(v -> {
             if (sheetLayout.isDismissing()) return;
-            setResult(requestUid, requestPid, requestCode, true, false);
+            setResult(requestUid, requestPid, requestCode, true, false, false);
+            sheetLayout.dismiss();
+        });
+        binding.button1Shell.setOnClickListener(v -> {
+            if (sheetLayout.isDismissing()) return;
+            setResult(requestUid, requestPid, requestCode, true, false, true);
             sheetLayout.dismiss();
         });
         binding.button2.setOnClickListener(v -> {
             if (sheetLayout.isDismissing()) return;
-            setResult(requestUid, requestPid, requestCode, true, true);
+            setResult(requestUid, requestPid, requestCode, true, true, false);
             sheetLayout.dismiss();
         });
         binding.button3.setOnClickListener(v -> {
             if (sheetLayout.isDismissing()) return;
-            setResult(requestUid, requestPid, requestCode, false, false);
+            setResult(requestUid, requestPid, requestCode, false, false, false);
             sheetLayout.dismiss();
         });
 
-        TextViewKt.applyCountdown(binding.button1, 1, null, 0);
+        TextViewKt.applyCountdown(binding.button1Root, 1, null, 0);
+        TextViewKt.applyCountdown(binding.button1Shell, 1, null, 0);
         TextViewKt.applyCountdown(binding.button2, 1, null, 0);
         TextViewKt.applyCountdown(binding.button3, 1, null, 0);
 
@@ -270,7 +281,9 @@ public class ConfirmationDialog {
         }
 
         float btnRadiusPx = 16f * density;
-        binding.button1.setBackground(
+        binding.button1Root.setBackground(
+                MiuixSmoothCardDrawable.Companion.createSelectorWithOverlay(context, btnColor, 16f, false));
+        binding.button1Shell.setBackground(
                 MiuixSmoothCardDrawable.Companion.createSelectorWithOverlay(context, btnColor, 16f, false));
         binding.button2.setBackground(
                 MiuixSmoothCardDrawable.Companion.createSelectorWithOverlay(context, btnColor, 16f, false));
