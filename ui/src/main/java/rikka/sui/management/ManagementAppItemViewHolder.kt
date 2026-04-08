@@ -81,7 +81,7 @@ class ManagementAppItemViewHolder(
     private val icon get() = binding.icon
     private val name get() = binding.title
     private val pkg get() = binding.summary
-    private val statusText get() = binding.button1 as TextView
+    private val statusText get() = binding.button1
 
     private val textColorSecondary: ColorStateList
     private val textColorPrimary: ColorStateList

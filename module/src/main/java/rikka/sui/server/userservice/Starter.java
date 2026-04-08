@@ -40,8 +40,12 @@ public class Starter {
     private static final int BRIDGE_ACTION_GET_BINDER = 2;
 
     public static void main(String[] args) {
-        if (Looper.getMainLooper() == null) {
-            Looper.prepareMainLooper();
+        if (Looper.myLooper() == null) {
+            if (Looper.getMainLooper() == null) {
+                prepareMainLooper();
+            } else {
+                Looper.prepare();
+            }
         }
 
         IBinder service;
@@ -66,6 +70,11 @@ public class Starter {
         System.exit(0);
 
         Log.i(TAG, "service exited");
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void prepareMainLooper() {
+        Looper.prepareMainLooper();
     }
 
     private static IBinder requestBinderFromBridge() {

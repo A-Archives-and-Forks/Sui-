@@ -26,6 +26,7 @@ import android.os.Looper;
 import android.system.Os;
 import android.text.TextUtils;
 import java.io.File;
+import java.util.Objects;
 import rikka.rish.Rish;
 import rikka.rish.RishConfig;
 import rikka.shizuku.Shizuku;
@@ -80,11 +81,16 @@ public class Shell extends Rish {
             RishConfig.setLibraryPath(new File(libPath).getAbsolutePath());
         }
 
-        if (Looper.getMainLooper() == null) {
-            Looper.prepareMainLooper();
+        if (Looper.myLooper() == null) {
+            if (Looper.getMainLooper() == null) {
+                prepareMainLooper();
+            } else {
+                Looper.prepare();
+            }
         }
 
-        Handler handler = new Handler(Looper.getMainLooper());
+        Looper looper = Objects.requireNonNull(Looper.myLooper());
+        Handler handler = new Handler(looper);
 
         try {
             if (!Sui.init(packageName)) {
@@ -117,5 +123,10 @@ public class Shell extends Rish {
 
         Looper.loop();
         System.exit(0);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void prepareMainLooper() {
+        Looper.prepareMainLooper();
     }
 }

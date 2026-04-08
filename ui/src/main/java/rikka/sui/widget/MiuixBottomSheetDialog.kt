@@ -32,7 +32,7 @@ class MiuixBottomSheetDialog(
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
             val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-            setBackgroundColor(if (isDark) 0x99000000.toInt() else 0x4D000000.toInt())
+            setBackgroundColor(if (isDark) 0x99000000.toInt() else 0x4D000000)
             alpha = 0f
         }
         (activity.window.decorView as ViewGroup).addView(dimOverlay)

@@ -129,23 +129,26 @@ public class SuiConfigManager extends ConfigManager {
         if (SuiService.isShellMode()) {
             reloadShellConfigFromFile();
             if (shellConfigObserver == null) {
-                shellConfigObserver =
-                        new android.os.FileObserver(
-                                "/data/local/tmp/sui_shell/",
-                                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
-                            @Override
-                            public void onEvent(int event, String path) {
-                                if ("sui_uids.txt".equals(path)) {
-                                    reloadShellConfigFromFile();
-                                }
-                            }
-                        };
+                shellConfigObserver = createShellConfigObserver();
                 shellConfigObserver.startWatching();
             }
         } else {
             // Root server initial sync
             syncUidsToShellFile();
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private android.os.FileObserver createShellConfigObserver() {
+        return new android.os.FileObserver(
+                "/data/local/tmp/sui_shell/", android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+            @Override
+            public void onEvent(int event, String path) {
+                if ("sui_uids.txt".equals(path)) {
+                    reloadShellConfigFromFile();
+                }
+            }
+        };
     }
 
     public int getGlobalSettings() {

@@ -81,14 +81,13 @@ public class Uninstaller {
 
         Log.i(TAG, "main");
 
-        //noinspection deprecation
-        Os.setuid(1000);
+        setSystemUid();
 
-        if (Looper.getMainLooper() == null) {
-            Looper.prepareMainLooper();
+        if (Looper.myLooper() == null) {
+            Looper.prepare();
         }
 
-        new Handler(Looper.getMainLooper()).post(() -> {
+        new Handler(Looper.myLooper()).post(() -> {
             try {
                 removeShortcuts();
             } catch (Throwable e) {
@@ -100,5 +99,10 @@ public class Uninstaller {
         });
 
         Looper.loop();
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void setSystemUid() throws ErrnoException {
+        Os.setuid(1000);
     }
 }

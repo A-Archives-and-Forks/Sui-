@@ -104,8 +104,9 @@ public class SuiApk {
         reloadResources();
     }
 
+    @SuppressWarnings("deprecation")
     public void reloadResources() throws Exception {
-        AssetManager am = AssetManager.class.newInstance();
+        AssetManager am = AssetManager.class.getConstructor().newInstance();
         Method addAssetPath = AssetManager.class.getDeclaredMethod("addAssetPath", String.class);
         addAssetPath.setAccessible(true);
         addAssetPath.invoke(am, apkPath);
@@ -141,6 +142,7 @@ public class SuiApk {
         this.resources = newResources;
     }
 
+    @SuppressWarnings("deprecation")
     public void updateConfiguration(android.content.res.Configuration newConfig) throws Exception {
         Resources res = this.resources;
         if (res != null) {

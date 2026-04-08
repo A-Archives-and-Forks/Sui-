@@ -90,6 +90,7 @@ public class SettingsInstrumentation extends Instrumentation {
             }
 
             @Override
+            @SuppressWarnings("deprecation")
             public void onLowMemory() {}
 
             @Override

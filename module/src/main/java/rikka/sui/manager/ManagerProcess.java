@@ -169,6 +169,7 @@ public class ManagerProcess {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private static void registerListener() {
         Context context = null;
         try {
