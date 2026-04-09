@@ -29,7 +29,9 @@ import android.os.Build;
 import android.util.ArrayMap;
 import dev.rikka.tools.refine.Refine;
 import java.io.File;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import rikka.hidden.compat.PackageManagerApis;
@@ -40,6 +42,54 @@ import rikka.sui.util.MapUtil;
 import rikka.sui.util.UserHandleCompat;
 
 public class AppListBuilder {
+
+    @SuppressWarnings("unchecked")
+    private static List<PackageInfo> getInstalledPackagesFallback(long flags, int user) {
+        try {
+            Class<?> appGlobalsClass = Class.forName("android.app.AppGlobals");
+            Method getPackageManager = appGlobalsClass.getDeclaredMethod("getPackageManager");
+            Object packageManager = getPackageManager.invoke(null);
+            if (packageManager == null) {
+                LOGGER.w("AppListBuilder: AppGlobals.getPackageManager() returned null for user %d", user);
+                return Collections.emptyList();
+            }
+
+            String[] candidates = {"getInstalledPackagesAsUser", "getInstalledPackages"};
+
+            for (String name : candidates) {
+                try {
+                    Method method = packageManager.getClass().getMethod(name, long.class, int.class);
+                    Object result = method.invoke(packageManager, flags, user);
+                    if (result instanceof android.content.pm.ParceledListSlice) {
+                        List<PackageInfo> list = ((android.content.pm.ParceledListSlice<PackageInfo>) result).getList();
+                        if (list != null) {
+                            LOGGER.i("AppListBuilder: using AppGlobals.%s(long,int) fallback for user %d", name, user);
+                            return list;
+                        }
+                    }
+                } catch (NoSuchMethodException ignored) {
+                }
+
+                try {
+                    Method method = packageManager.getClass().getMethod(name, int.class, int.class);
+                    Object result = method.invoke(packageManager, (int) flags, user);
+                    if (result instanceof android.content.pm.ParceledListSlice) {
+                        List<PackageInfo> list = ((android.content.pm.ParceledListSlice<PackageInfo>) result).getList();
+                        if (list != null) {
+                            LOGGER.i("AppListBuilder: using AppGlobals.%s(int,int) fallback for user %d", name, user);
+                            return list;
+                        }
+                    }
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+
+            LOGGER.w("AppListBuilder: no compatible AppGlobals package query method found for user %d", user);
+        } catch (Throwable e) {
+            LOGGER.w(e, "AppListBuilder: AppGlobals package query fallback failed for user %d", user);
+        }
+        return Collections.emptyList();
+    }
 
     private static int getFlagsForUidInternal(SuiConfigManager configManager, int uid, int mask) {
         SuiConfig.PackageEntry entry = configManager.findExplicit(uid);
@@ -65,11 +115,21 @@ public class AppListBuilder {
         int installedBaseFlags = 0x00002000 /*MATCH_UNINSTALLED_PACKAGES*/ | PackageManager.GET_PERMISSIONS;
 
         for (int user : users) {
-            for (PackageInfo pi : PackageManagerApis.getInstalledPackagesNoThrow(installedBaseFlags, user)) {
+            List<PackageInfo> packages = PackageManagerApis.getInstalledPackagesNoThrow(installedBaseFlags, user);
+            if (packages.isEmpty()) {
+                LOGGER.w(
+                        "AppListBuilder: PackageManagerApis.getInstalledPackagesNoThrow returned 0 packages for user %d",
+                        user);
+                packages = getInstalledPackagesFallback(installedBaseFlags, user);
+            }
+
+            for (PackageInfo pi : packages) {
                 try {
                     if (pi.applicationInfo == null
                             || Refine.<PackageInfoHidden>unsafeCast(pi).overlayTarget != null
-                            || (pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) == 0) continue;
+                            || (pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) == 0) {
+                        continue;
+                    }
 
                     int uid = pi.applicationInfo.uid;
 
@@ -81,7 +141,9 @@ public class AppListBuilder {
                         }
 
                         if (!explicitlyAllowed) {
-                            if (pi.requestedPermissions == null) continue;
+                            if (pi.requestedPermissions == null) {
+                                continue;
+                            }
                             boolean requested = false;
                             for (String p : pi.requestedPermissions) {
                                 if ("moe.shizuku.manager.permission.API_V23".equals(p)) {
@@ -89,37 +151,41 @@ public class AppListBuilder {
                                     break;
                                 }
                             }
-                            if (!requested) continue;
+                            if (!requested) {
+                                continue;
+                            }
                         }
                     }
 
                     int appId = UserHandleCompat.getAppId(uid);
-                    if (uid == systemUiUid) continue;
+                    if (uid == systemUiUid) {
+                        continue;
+                    }
 
                     int flags = getFlagsForUidInternal(configManager, uid, SuiConfig.MASK_PERMISSION);
-                    if (flags == 0 && uid != 2000 && appId < 10000) continue;
+                    if (flags == 0 && uid != 2000 && appId < 10000) {
+                        continue;
+                    }
 
                     if (flags == 0) {
-                        String dataDir;
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            dataDir = pi.applicationInfo.deviceProtectedDataDir;
-                        } else {
-                            dataDir = pi.applicationInfo.dataDir;
-                        }
-
                         final String sourceDir = pi.applicationInfo.sourceDir;
+                        final String dataDir = pi.applicationInfo.dataDir;
+                        final String deviceProtectedDataDir = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                                ? pi.applicationInfo.deviceProtectedDataDir
+                                : null;
                         boolean hasApk = sourceDir != null
                                 && MapUtil.getOrPut(existenceCache, sourceDir, () -> new File(sourceDir).exists());
-                        boolean hasData = dataDir != null
-                                && MapUtil.getOrPut(existenceCache, dataDir, () -> new File(dataDir).exists());
+                        boolean hasData = (dataDir != null
+                                        && MapUtil.getOrPut(existenceCache, dataDir, () -> new File(dataDir).exists()))
+                                || (deviceProtectedDataDir != null
+                                        && MapUtil.getOrPut(existenceCache, deviceProtectedDataDir, () -> new File(
+                                                        deviceProtectedDataDir)
+                                                .exists()));
 
                         // Installed (or hidden): hasApk && hasData
                         // Uninstalled but keep data: !hasApk && hasData
                         // Installed in other users only: hasApk && !hasData
                         if (!(hasApk && hasData)) {
-                            LOGGER.v(
-                                    "skip %d:%s: hasApk=%s, hasData=%s",
-                                    user, pi.packageName, Boolean.toString(hasApk), Boolean.toString(hasData));
                             continue;
                         }
                     }
