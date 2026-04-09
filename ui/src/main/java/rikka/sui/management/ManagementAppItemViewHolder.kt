@@ -48,6 +48,7 @@ import rikka.sui.util.MiuixPopupDimOverlay
 import rikka.sui.util.MiuixPressHelper
 import rikka.sui.util.MiuixSmoothCardDrawable
 import rikka.sui.util.MiuixSquircleProvider
+import rikka.sui.util.MonetSettings
 import rikka.sui.util.UserHandleCompat
 import rikka.sui.util.applyMiuixPopupStyle
 import rikka.sui.util.colorCheckedItemsMiuixBlue
@@ -98,8 +99,7 @@ class ManagementAppItemViewHolder(
 
         var normalColor = context.getColor(R.color.miuix_card_normal)
         val isNight = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        val prefs = context.getSharedPreferences("sui_settings", Context.MODE_PRIVATE)
-        if (!isNight && prefs.getBoolean("monet_enabled", true)) {
+        if (!isNight && MonetSettings.isMonetEnabled(context)) {
             val primaryColor = context.theme.resolveColor(androidx.appcompat.R.attr.colorPrimary)
             normalColor = ColorUtils.blendARGB(normalColor, primaryColor, 0.10f)
         }

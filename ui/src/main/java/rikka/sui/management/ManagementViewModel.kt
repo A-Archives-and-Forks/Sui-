@@ -43,7 +43,7 @@ class ManagementViewModel : ViewModel() {
     private val uiDebugMode = false
     private val fullList = ArrayList<AppInfo>()
     var showOnlyShizukuApps = false
-    var isMonetEnabled = true
+    var isMonetEnabled = false
     private var hasLoadedGlobalSettings = false
     val appList = MutableLiveData<Resource<List<AppInfo>>>(null)
     private var currentQuery: String? = null

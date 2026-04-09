@@ -32,6 +32,8 @@ import rikka.shizuku.server.ConfigManager;
 public class SuiConfigManager extends ConfigManager {
 
     public static final int DEFAULT_UID = -1;
+    private static final int FLAG_GLOBAL_SETTINGS_INITIALIZED = 1 << 30;
+    private static final int FLAG_MONET_DISABLED = 1 << 1;
 
     private static android.os.FileObserver shellConfigObserver;
 
@@ -154,12 +156,19 @@ public class SuiConfigManager extends ConfigManager {
     public int getGlobalSettings() {
         synchronized (this) {
             SuiConfig.PackageEntry entry = findLocked(UID_GLOBAL_SETTINGS);
-            return entry != null ? entry.flags : 0;
+            if (entry == null) {
+                return FLAG_MONET_DISABLED;
+            }
+            int flags = entry.flags & ~FLAG_GLOBAL_SETTINGS_INITIALIZED;
+            if ((entry.flags & FLAG_GLOBAL_SETTINGS_INITIALIZED) == 0) {
+                flags |= FLAG_MONET_DISABLED;
+            }
+            return flags;
         }
     }
 
     public void setGlobalSettings(int flags) {
-        update(UID_GLOBAL_SETTINGS, 0xFFFFFFFF, flags);
+        update(UID_GLOBAL_SETTINGS, 0xFFFFFFFF, flags | FLAG_GLOBAL_SETTINGS_INITIALIZED);
     }
 
     private SuiConfig.PackageEntry findLocked(int uid) {

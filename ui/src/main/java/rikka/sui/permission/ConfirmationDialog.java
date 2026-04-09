@@ -70,7 +70,7 @@ public class ConfirmationDialog {
     private final Context context;
     private final Resources resources;
     private final LayoutInflater layoutInflater;
-    private boolean monetEnabled = true;
+    private boolean monetEnabled = false;
     private final boolean isNight;
 
     @SuppressWarnings("deprecation")

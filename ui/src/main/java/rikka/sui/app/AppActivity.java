@@ -21,7 +21,6 @@ package rikka.sui.app;
 
 import android.app.Application;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -40,6 +39,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.google.android.material.color.DynamicColors;
 import rikka.sui.R;
 import rikka.sui.ktx.ResourcesKt;
+import rikka.sui.util.MonetSettings;
 
 public class AppActivity extends AppCompatActivity {
 
@@ -79,8 +79,18 @@ public class AppActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         setTheme(R.style.Theme_Sui);
 
-        SharedPreferences prefs = getApplicationContext().getSharedPreferences("sui_settings", Context.MODE_PRIVATE);
-        if (prefs.getBoolean("monet_enabled", true)) {
+        final boolean monetEnabled = MonetSettings.isMonetEnabled(this);
+        MonetSettings.syncFromServerAsync(this, (changed, enabled) -> {
+            if (!changed) {
+                return;
+            }
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    recreate();
+                }
+            });
+        });
+        if (monetEnabled) {
             DynamicColors.applyToActivityIfAvailable(this);
         }
 
@@ -109,7 +119,7 @@ public class AppActivity extends AppCompatActivity {
 
             boolean isNight = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                     == Configuration.UI_MODE_NIGHT_YES;
-            if (isNight && prefs.getBoolean("monet_enabled", true)) {
+            if (isNight && monetEnabled) {
                 int primaryColor = ResourcesKt.resolveColor(getTheme(), androidx.appcompat.R.attr.colorPrimary);
                 int blendedBg = ColorUtils.blendARGB(Color.BLACK, primaryColor, 0.10f);
                 rootView.setBackgroundColor(blendedBg);

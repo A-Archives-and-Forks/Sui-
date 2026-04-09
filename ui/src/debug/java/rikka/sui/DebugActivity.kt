@@ -26,6 +26,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import rikka.sui.management.ManagementFragment
+import rikka.sui.util.MonetSettings
 
 class DebugActivity : AppCompatActivity() {
     companion object {
@@ -36,8 +37,9 @@ class DebugActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_Sui)
-        val prefs = applicationContext.getSharedPreferences("sui_settings", android.content.Context.MODE_PRIVATE)
-        if (prefs.getBoolean("monet_enabled", true)) {
+        val monetEnabled = MonetSettings.isMonetEnabled(this)
+        MonetSettings.syncFromServerAsync(this)
+        if (monetEnabled) {
             com.google.android.material.color.DynamicColors
                 .applyToActivityIfAvailable(this)
         }

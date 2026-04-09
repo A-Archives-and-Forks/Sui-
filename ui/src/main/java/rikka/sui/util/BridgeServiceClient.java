@@ -46,12 +46,12 @@ public class BridgeServiceClient {
     private static IBinder binder;
     private static IShizukuService service;
 
-    public static int getGlobalSettings() {
+    @Nullable public static Integer getGlobalSettingsOrNull() {
         android.util.Log.d("SuiBridgeDebug", "Fetching global settings via BINDER_TRANSACTION_getGlobalSettings.");
         IShizukuService s = getService();
         if (s == null) {
             android.util.Log.e("SuiBridgeDebug", "Service is null when fetching global settings.");
-            return 0;
+            return null;
         }
 
         Parcel data = Parcel.obtain();
@@ -65,14 +65,19 @@ public class BridgeServiceClient {
             return flags;
         } catch (RemoteException e) {
             android.util.Log.e("SuiBridgeDebug", "RemoteException when calling getGlobalSettings via binder", e);
-            return 0;
+            return null;
         } catch (Throwable e) {
             android.util.Log.e("SuiBridgeDebug", "Exception when calling getGlobalSettings via binder", e);
-            return 0;
+            return null;
         } finally {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    public static int getGlobalSettings() {
+        Integer flags = getGlobalSettingsOrNull();
+        return flags != null ? flags : 0;
     }
 
     public static boolean setGlobalSettings(int flags) {

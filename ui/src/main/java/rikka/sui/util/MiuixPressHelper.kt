@@ -186,8 +186,7 @@ fun PopupMenu.applyMiuixPopupStyle() {
                         val radiusPx = 16f * listView.context.resources.displayMetrics.density
                         var bgColor = ContextCompat.getColor(listView.context, R.color.miuix_card_normal)
                         val isNight = (listView.context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-                        val prefs = listView.context.getSharedPreferences("sui_settings", Context.MODE_PRIVATE)
-                        if (!isNight && prefs.getBoolean("monet_enabled", true)) {
+                        if (!isNight && MonetSettings.isMonetEnabled(listView.context)) {
                             val primaryColor = listView.context.theme.resolveColor(androidx.appcompat.R.attr.colorPrimary)
                             bgColor = ColorUtils.blendARGB(bgColor, primaryColor, 0.10f)
                         }
