@@ -38,6 +38,27 @@ public class Starter {
     private static final String BRIDGE_SERVICE_DESCRIPTOR = "android.app.IActivityManager";
     private static final String BRIDGE_SERVICE_NAME = "activity";
     private static final int BRIDGE_ACTION_GET_BINDER = 2;
+    private static final int SERVER_UID_ROOT = 0;
+    private static final int SERVER_UID_SHELL = 2000;
+
+    private static int parseServerUid(String[] args) {
+        for (String arg : args) {
+            if (arg.startsWith("--server-uid=")) {
+                try {
+                    int uid = Integer.parseInt(arg.substring(13));
+                    if (uid == SERVER_UID_ROOT || uid == SERVER_UID_SHELL) {
+                        return uid;
+                    }
+                    Log.w(TAG, "Unsupported --server-uid=" + uid);
+                    return -1;
+                } catch (NumberFormatException e) {
+                    Log.w(TAG, "Invalid --server-uid argument", e);
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
 
     public static void main(String[] args) {
         if (Looper.myLooper() == null) {
@@ -50,6 +71,7 @@ public class Starter {
 
         IBinder service;
         String token;
+        int serverUid = parseServerUid(args);
 
         UserService.setTag(TAG);
         Pair<IBinder, String> result = UserService.create(args);
@@ -62,7 +84,7 @@ public class Starter {
         service = result.first;
         token = result.second;
 
-        if (!sendBinder(service, token)) {
+        if (!sendBinder(service, token, serverUid)) {
             System.exit(1);
         }
 
@@ -77,7 +99,7 @@ public class Starter {
         Looper.prepareMainLooper();
     }
 
-    private static IBinder requestBinderFromBridge() {
+    private static IBinder requestBinderFromBridge(int serverUid) {
         IBinder binder = ServiceManager.getService(BRIDGE_SERVICE_NAME);
         if (binder == null) return null;
 
@@ -86,6 +108,9 @@ public class Starter {
         try {
             data.writeInterfaceToken(BRIDGE_SERVICE_DESCRIPTOR);
             data.writeInt(BRIDGE_ACTION_GET_BINDER);
+            if (serverUid == SERVER_UID_ROOT || serverUid == SERVER_UID_SHELL) {
+                data.writeInt(serverUid);
+            }
             binder.transact(BRIDGE_TRANSACTION_CODE, data, reply, 0);
             reply.readException();
             IBinder received = reply.readStrongBinder();
@@ -101,8 +126,8 @@ public class Starter {
         return null;
     }
 
-    private static boolean sendBinder(IBinder binder, String token) {
-        IShizukuService shizukuService = IShizukuService.Stub.asInterface(requestBinderFromBridge());
+    private static boolean sendBinder(IBinder binder, String token, int serverUid) {
+        IShizukuService shizukuService = IShizukuService.Stub.asInterface(requestBinderFromBridge(serverUid));
         if (shizukuService == null) {
             return false;
         }

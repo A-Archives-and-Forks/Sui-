@@ -38,6 +38,8 @@ public class BridgeService {
     private static final int ACTION_GET_BINDER = ACTION_SEND_BINDER + 1;
     private static final int ACTION_NOTIFY_FINISHED = ACTION_SEND_BINDER + 2;
     private static final int ACTION_SYNC_UIDS = ACTION_SEND_BINDER + 3;
+    private static final int SERVER_UID_ROOT = 0;
+    private static final int SERVER_UID_SHELL = 2000;
 
     private static final int RETRY_MAX = 3;
     private static final long RETRY_DELAY_MS = 1000;
@@ -144,18 +146,28 @@ public class BridgeService {
             }
             case ACTION_GET_BINDER: {
                 int callingUid = Binder.getCallingUid();
-                if (Bridge.isHidden(callingUid)) {
+                int targetUid = callingUid;
+                Integer requestedServerUid = null;
+                if ((callingUid == 0 || callingUid == 2000) && data.dataAvail() >= Integer.BYTES) {
+                    int value = data.readInt();
+                    if (value == SERVER_UID_ROOT || value == SERVER_UID_SHELL) {
+                        requestedServerUid = value;
+                    }
+                }
+
+                if (Bridge.isHidden(targetUid)) {
                     return false;
                 }
-                boolean isRootAllowed = Bridge.isRootAllowed(callingUid);
-                boolean isShellAllowed = Bridge.isShellAllowed(callingUid);
 
                 // Wait for the requested binder to be available
                 IBinder requestedBinder = null;
                 for (int i = 0; i < RETRY_MAX; i++) {
-                    if (isRootAllowed) {
+                    if (requestedServerUid != null) {
+                        requestedBinder =
+                                requestedServerUid == SERVER_UID_ROOT ? rootServiceBinder : shellServiceBinder;
+                    } else if (Bridge.isRootAllowed(targetUid)) {
                         requestedBinder = rootServiceBinder;
-                    } else if (isShellAllowed) {
+                    } else if (Bridge.isShellAllowed(targetUid)) {
                         requestedBinder = shellServiceBinder;
                     } else {
                         // Manager apps usually check via another way but fallback here if needed, just return root
@@ -173,6 +185,17 @@ public class BridgeService {
                     } catch (InterruptedException ignored) {
                     }
                 }
+
+                LOGGER.d(
+                        "getBinder: callingUid=%d, targetUid=%d, requestedServer=%s, selected=%s",
+                        callingUid,
+                        targetUid,
+                        requestedServerUid == null
+                                ? "auto"
+                                : (requestedServerUid == SERVER_UID_ROOT ? "root" : "shell"),
+                        requestedBinder == rootServiceBinder
+                                ? "root"
+                                : requestedBinder == shellServiceBinder ? "shell" : "null");
 
                 if (reply != null) {
                     reply.writeNoException();

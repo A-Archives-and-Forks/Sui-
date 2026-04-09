@@ -452,7 +452,6 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
                             try {
                                 ActivityManagerApis.forceStopPackageNoThrow(
                                         record.packageName, UserHandleCompat.getUserId(requestUid));
-                                getUserServiceManager().removeUserServicesForPackage(record.packageName);
                                 LOGGER.i("Auto-restarting %s dynamically", record.packageName);
                                 AppLaunchUtils.startAppAsUser(
                                         record.packageName, UserHandleCompat.getUserId(requestUid));
