@@ -34,12 +34,79 @@ public class SuiConfigManager extends ConfigManager {
     public static final int DEFAULT_UID = -1;
     private static final int FLAG_GLOBAL_SETTINGS_INITIALIZED = 1 << 30;
     private static final int FLAG_MONET_DISABLED = 1 << 1;
+    private static final String LEGACY_SHELL_DIR = "/data/local/tmp/sui_shell";
+    private static final String SHELL_BASE_DIR = "/data/local/tmp";
+    private static final String SHELL_DIR_MARKER = "/data/adb/sui/shell_dir_name";
+    private static final String SHELL_CONFIG_FILENAME = "sui_uids.txt";
+    private static final String SHELL_DIR_PREFIX = "sui_shell_";
 
     private static android.os.FileObserver shellConfigObserver;
 
+    private static boolean isValidShellDirName(String name) {
+        if ("sui_shell".equals(name)) {
+            return true;
+        }
+        if (!name.startsWith(SHELL_DIR_PREFIX)) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            boolean ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '_' || c == '-';
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static File resolveShellDirFromMarkerValue(String value) {
+        if (value.startsWith(SHELL_BASE_DIR + "/")) {
+            String name = value.substring(SHELL_BASE_DIR.length() + 1);
+            if (isValidShellDirName(name)) {
+                return new File(value);
+            }
+            return null;
+        }
+        if (isValidShellDirName(value)) {
+            return new File(SHELL_BASE_DIR, value);
+        }
+        return null;
+    }
+
+    private File getShellDir() {
+        String runtimePath = SuiService.isShellMode() ? SuiService.getFilesPath() : null;
+        if (runtimePath != null && !runtimePath.isEmpty()) {
+            return new File(runtimePath);
+        }
+
+        File marker = new File(SHELL_DIR_MARKER);
+        if (marker.exists() && marker.length() > 0) {
+            try (BufferedReader br = new BufferedReader(new FileReader(marker))) {
+                String line = br.readLine();
+                if (line != null) {
+                    String value = line.trim();
+                    if (!value.isEmpty()) {
+                        File resolved = resolveShellDirFromMarkerValue(value);
+                        if (resolved != null) {
+                            return resolved;
+                        }
+                        LOGGER.w("Invalid shell dir marker content: %s", value);
+                    }
+                }
+            } catch (Throwable e) {
+                LOGGER.w(e, "Failed to read shell dir marker, fallback to legacy path");
+            }
+        }
+        return new File(LEGACY_SHELL_DIR);
+    }
+
+    private File getShellConfigFile() {
+        return new File(getShellDir(), SHELL_CONFIG_FILENAME);
+    }
+
     private void reloadShellConfigFromFile() {
         try {
-            java.io.File file = new java.io.File("/data/local/tmp/sui_shell/sui_uids.txt");
+            java.io.File file = getShellConfigFile();
             if (!file.exists()) return;
             try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(file))) {
                 String line;
@@ -82,10 +149,10 @@ public class SuiConfigManager extends ConfigManager {
                     sb.append(entry.uid).append(":").append(entry.flags).append("\n");
                 }
             }
-            java.io.File dir = new java.io.File("/data/local/tmp/sui_shell");
+            java.io.File dir = getShellDir();
             if (!dir.exists()) dir.mkdirs();
-            java.io.File file = new java.io.File(dir, "sui_uids.txt");
-            java.io.File tempFile = new java.io.File(dir, "sui_uids.txt.tmp");
+            java.io.File file = new java.io.File(dir, SHELL_CONFIG_FILENAME);
+            java.io.File tempFile = new java.io.File(dir, SHELL_CONFIG_FILENAME + ".tmp");
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile)) {
                 fos.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 fos.getFD().sync();
@@ -142,11 +209,12 @@ public class SuiConfigManager extends ConfigManager {
 
     @SuppressWarnings("deprecation")
     private android.os.FileObserver createShellConfigObserver() {
+        final File shellDir = getShellDir();
         return new android.os.FileObserver(
-                "/data/local/tmp/sui_shell/", android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+                shellDir.getAbsolutePath(), android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
             @Override
             public void onEvent(int event, String path) {
-                if ("sui_uids.txt".equals(path)) {
+                if (SHELL_CONFIG_FILENAME.equals(path)) {
                     reloadShellConfigFromFile();
                 }
             }

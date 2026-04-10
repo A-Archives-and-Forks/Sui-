@@ -84,6 +84,10 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         return shellMode;
     }
 
+    public static String getFilesPath() {
+        return filesPath;
+    }
+
     public static void main(String filesPath, boolean isShell) {
         LOGGER.i("starting server (isShell=%b)...", isShell);
 
