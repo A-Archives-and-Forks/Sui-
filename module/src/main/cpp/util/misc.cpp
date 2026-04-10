@@ -30,24 +30,35 @@
 #include "misc.h"
 
 int mkdirs(const char* pathname, mode_t mode) {
-    char *path = strdup(pathname), *p;
+    char* path = strdup(pathname);
+    char* p;
+    int result = 0;
+    if (path == nullptr) {
+        errno = ENOMEM;
+        return -1;
+    }
     errno = 0;
     for (p = path + 1; *p; ++p) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(path, mode) == -1) {
-                if (errno != EEXIST)
-                    return -1;
+                if (errno != EEXIST) {
+                    result = -1;
+                    goto cleanup;
+                }
             }
             *p = '/';
         }
     }
     if (mkdir(path, mode) == -1) {
-        if (errno != EEXIST)
-            return -1;
+        if (errno != EEXIST) {
+            result = -1;
+            goto cleanup;
+        }
     }
+cleanup:
     free(path);
-    return 0;
+    return result;
 }
 
 int ensure_dir(const char* path, mode_t mode) {
@@ -142,9 +153,8 @@ int write_full(int fd, const void* buf, size_t count) {
 }
 
 int is_num(const char* s) {
-    size_t len = strlen(s);
-    for (size_t i = 0; i < len; ++i)
-        if (s[i] < '0' || s[i] > '9')
+    for (; *s; ++s)
+        if (*s < '0' || *s > '9')
             return 0;
     return 1;
 }

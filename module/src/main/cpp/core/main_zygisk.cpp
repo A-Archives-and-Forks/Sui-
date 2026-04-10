@@ -14,6 +14,8 @@
 #include <nativehelper/scoped_utf_chars.h>
 #include <fcntl.h>
 #include <cinttypes>
+#include <memory>
+#include <algorithm>
 #include <socket.h>
 #include <sys/system_properties.h>
 #include "system_server.h"
@@ -22,6 +24,17 @@
 #include "manager_process.h"
 
 inline constexpr auto kProcessNameMax = 256;
+
+static void CopyString(char* dst, size_t dst_size, const char* src) {
+    if (dst_size == 0) {
+        return;
+    }
+    if (src == nullptr) {
+        dst[0] = '\0';
+        return;
+    }
+    snprintf(dst, dst_size, "%s", src);
+}
 
 enum Identity : int {
 
@@ -44,18 +57,18 @@ class ZygiskModule : public zygisk::ModuleBase {
 
         if (args->nice_name) {
             ScopedUtfChars niceName{env_, args->nice_name};
-            strcpy(process_name, niceName.c_str());
+            CopyString(process_name, sizeof(process_name), niceName.c_str());
         }
 
         if (args->app_data_dir) {
             ScopedUtfChars appDataDir{env_, args->app_data_dir};
-            strcpy(app_data_dir, appDataDir.c_str());
+            CopyString(app_data_dir, sizeof(app_data_dir), appDataDir.c_str());
         }
 
         if (process_name[0] == '\0' && app_data_dir[0] != '\0') {
             auto p = strrchr(app_data_dir, '/');
             if (p != nullptr) {
-                strcpy(process_name, p + 1);
+                CopyString(process_name, sizeof(process_name), p + 1);
             }
         }
 
@@ -83,7 +96,7 @@ class ZygiskModule : public zygisk::ModuleBase {
 
         if (args->app_data_dir) {
             ScopedUtfChars appDataDir{env_, args->app_data_dir};
-            strcpy(app_data_dir, appDataDir.c_str());
+            CopyString(app_data_dir, sizeof(app_data_dir), appDataDir.c_str());
             LOGI("SuiZygisk: app_data_dir is %s", app_data_dir);
         } else {
             LOGI("SuiZygisk: app_data_dir is NULL");
@@ -91,10 +104,10 @@ class ZygiskModule : public zygisk::ModuleBase {
 
         if (whoami == Identity::SETTINGS) {
             LOGI("SuiZygisk: Calling Settings::main");
-            Settings::main(env_, app_data_dir, dex);
+            Settings::main(env_, app_data_dir, dex.get());
         } else if (whoami == Identity::SYSTEM_UI) {
             LOGI("SuiZygisk: Calling Manager::main");
-            Manager::main(env_, app_data_dir, dex);
+            Manager::main(env_, app_data_dir, dex.get());
         }
         LOGI("SuiZygisk: postAppSpecialize finished");
     }
@@ -114,7 +127,7 @@ class ZygiskModule : public zygisk::ModuleBase {
             env_->CallStaticVoidMethod(process, set_argv0, env_->NewStringUTF("system_server"));
         }
 
-        SystemServer::main(env_, dex);
+        SystemServer::main(env_, dex.get());
     }
 
    private:
@@ -122,7 +135,7 @@ class ZygiskModule : public zygisk::ModuleBase {
     JNIEnv* env_{};
 
     Identity whoami = Identity::IGNORE;
-    Dex* dex = nullptr;
+    std::unique_ptr<Dex> dex;
 
     void InitCompanion(bool is_system_server, int uid, const char* process_name = nullptr) {
         auto companion = api_->connectCompanion();
@@ -154,7 +167,7 @@ class ZygiskModule : public zygisk::ModuleBase {
             }
 
             LOGI("Zygote: dex fd is %d, size is %" PRIdPTR, fd, size);
-            dex = new Dex(fd, size);
+            dex = std::make_unique<Dex>(fd, size);
             close(fd);
         }
 
@@ -175,8 +188,9 @@ static void ReadApplicationInfo(const char* package, uid_t& uid, char* process) 
     auto size = file.size();
     for (int i = 0; i < size; ++i) {
         if (bytes[i] == '\n') {
-            memset(process, 0, 256);
-            memcpy(process, bytes + i + 1, size - i - 1);
+            memset(process, 0, kProcessNameMax);
+            size_t process_size = std::min<size_t>(size - i - 1, kProcessNameMax - 1);
+            memcpy(process, bytes + i + 1, process_size);
             bytes[i] = 0;
             uid = atoi((char*)bytes);
             break;
