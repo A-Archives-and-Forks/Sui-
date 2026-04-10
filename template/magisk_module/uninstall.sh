@@ -5,6 +5,9 @@ MODULES=$(dirname "$MODDIR")
 uninstall() {
   chmod 700 "$MODDIR"/bin/uninstall
   "$MODDIR"/bin/uninstall "$MODDIR"
+  rm -rf /data/local/tmp/sui_shell
+  rm -rf /data/local/tmp/sui_shell_*
+  rm -rf /data/system/sui
   rm -rf "/data/adb/sui"
 }
 
