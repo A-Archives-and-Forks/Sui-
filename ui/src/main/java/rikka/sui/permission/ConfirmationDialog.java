@@ -59,6 +59,7 @@ import rikka.sui.util.AppLabel;
 import rikka.sui.util.BridgeServiceClient;
 import rikka.sui.util.Logger;
 import rikka.sui.util.MiuixSmoothCardDrawable;
+import rikka.sui.util.MiuixSquircleUtils;
 import rikka.sui.util.UserHandleCompat;
 import rikka.sui.widget.MiuixBottomSheetLayout;
 
@@ -254,8 +255,7 @@ public class ConfirmationDialog {
         TextViewKt.applyCountdown(binding.button3, 1, null, 0);
 
         float density = context.getResources().getDisplayMetrics().density;
-        float dynamicRadiusPx =
-                rikka.sui.util.MiuixSquircleUtils.INSTANCE.getBottomCornerRadius(context) + 12f * density;
+        float dynamicRadiusPx = MiuixSquircleUtils.INSTANCE.getBottomCornerRadius(context) + 12f * density;
         int sheetColor = resources.getColor(R.color.miuix_bottom_sheet_bg_color, context.getTheme());
         binding.getRoot().setBackground(new MiuixSmoothCardDrawable(dynamicRadiusPx, sheetColor, false));
 

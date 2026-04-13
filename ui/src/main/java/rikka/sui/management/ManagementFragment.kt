@@ -57,6 +57,7 @@ import me.zhanghai.android.fastscroll.FastScrollerBuilder
 import rikka.lifecycle.Resource
 import rikka.lifecycle.Status
 import rikka.lifecycle.viewModels
+import rikka.sui.BuildConfig
 import rikka.sui.R
 import rikka.sui.app.AppFragment
 import rikka.sui.databinding.ManagementBinding
@@ -66,10 +67,12 @@ import rikka.sui.server.SuiConfig
 import rikka.sui.util.BridgeServiceClient
 import rikka.sui.util.MiuixBounceEdgeEffectFactory
 import rikka.sui.util.MiuixPopupDimOverlay
+import rikka.sui.util.MiuixPressHelper
 import rikka.sui.util.MiuixPullToRefreshView
 import rikka.sui.util.MiuixSmoothCardDrawable
 import rikka.sui.util.MiuixSquircleUtils
 import rikka.sui.util.applyMiuixPopupStyle
+import rikka.sui.widget.MiuixBottomSheetDialog
 
 class ManagementFragment : AppFragment() {
 
@@ -123,14 +126,14 @@ class ManagementFragment : AppFragment() {
                         if (searchButtonView != null) {
                             searchButtonView.background = ContextCompat.getDrawable(requireContext(), R.drawable.miuix_action_icon_bg)
                             searchButtonView.setOnLongClickListener { true }
-                            searchButtonView.setOnTouchListener(rikka.sui.util.MiuixPressHelper())
+                            searchButtonView.setOnTouchListener(MiuixPressHelper())
                         }
 
                         val overflowButtonView = requireActivity().findViewById<View>(R.id.action_overflow)
                         if (overflowButtonView != null) {
                             overflowButtonView.background = ContextCompat.getDrawable(requireContext(), R.drawable.miuix_action_icon_bg)
                             overflowButtonView.setOnLongClickListener { true }
-                            overflowButtonView.setOnTouchListener(rikka.sui.util.MiuixPressHelper())
+                            overflowButtonView.setOnTouchListener(MiuixPressHelper())
                             overflowButtonView.setOnClickListener { anchorView ->
                                 showOverflowPopupMenu(anchorView)
                             }
@@ -426,7 +429,7 @@ class ManagementFragment : AppFragment() {
     @android.annotation.SuppressLint("StringFormatInvalid")
     private fun showAboutDialog() {
         val versionName = try {
-            rikka.sui.BuildConfig.VERSION_NAME
+            BuildConfig.VERSION_NAME
         } catch (e: Exception) {
             "Unknown"
         }
@@ -454,6 +457,7 @@ class ManagementFragment : AppFragment() {
                 "0xSoul24" to "https://github.com/0xSoul24",
                 "Howard20181" to "https://github.com/Howard20181",
                 "Kr328" to "https://github.com/Kr328",
+                "binyaminyblatt" to "https://github.com/binyaminyblatt",
             )
 
             val contributorsNamesString = githubLinks.keys.joinToString(", ")
@@ -533,7 +537,7 @@ class ManagementFragment : AppFragment() {
         textView?.text = message
         textView?.movementMethod = LinkMovementMethod.getInstance()
 
-        val bottomSheetDialog = rikka.sui.widget.MiuixBottomSheetDialog(requireContext(), contentView)
+        val bottomSheetDialog = MiuixBottomSheetDialog(requireContext(), contentView)
         buttonOk?.setOnClickListener {
             bottomSheetDialog.dismiss()
         }

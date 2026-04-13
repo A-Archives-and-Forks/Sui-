@@ -18,7 +18,6 @@
  */
 package rikka.sui.management
 
-import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Typeface
@@ -30,7 +29,6 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.get
@@ -111,7 +109,7 @@ class ManagementAppItemViewHolder(
         this.itemView.setOnClickListener { showPopupMenu() }
         this.itemView.setOnTouchListener(MiuixPressHelper())
 
-        iconSize = context.resources.getDimensionPixelSize(rikka.sui.R.dimen.expected_app_icon_max_size)
+        iconSize = context.resources.getDimensionPixelSize(R.dimen.expected_app_icon_max_size)
 
         icon.outlineProvider = MiuixSquircleProvider(10.5f)
         icon.clipToOutline = true
