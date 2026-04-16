@@ -19,6 +19,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
+#include <cerrno>
 #include <logging.h>
 #include <unistd.h>
 #include <sched.h>
@@ -33,8 +35,12 @@ static int uninstall_main(int argc, char** argv) {
     auto root_path = argv[1];
 
     char dex_path[PATH_MAX]{0};
-    strcpy(dex_path, root_path);
-    strcat(dex_path, "/sui.dex");
+    int written = snprintf(dex_path, sizeof(dex_path), "%s/sui.dex", root_path);
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(dex_path)) {
+        errno = ENAMETOOLONG;
+        PLOGE("snprintf %s/sui.dex", root_path);
+        return EXIT_FAILURE;
+    }
 
     if (copyfile(dex_path, "/dev/sui.dex") != 0) {
         PLOGE("copyfile");

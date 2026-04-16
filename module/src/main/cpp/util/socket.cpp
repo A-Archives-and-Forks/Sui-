@@ -20,7 +20,13 @@ static size_t socket_len(sockaddr_un* sun) {
 socklen_t setup_sockaddr(sockaddr_un* sun, const char* name) {
     memset(sun, 0, sizeof(*sun));
     sun->sun_family = AF_UNIX;
-    strcpy(sun->sun_path + 1, name);
+    size_t max_len = sizeof(sun->sun_path) - 2;
+    size_t name_len = strlen(name);
+    if (name_len > max_len) {
+        errno = ENAMETOOLONG;
+        return 0;
+    }
+    memcpy(sun->sun_path + 1, name, name_len + 1);
     return socket_len(sun);
 }
 

@@ -221,6 +221,16 @@ static std::string resolve_shell_dir_path() {
     return std::string(SHELL_BASE_DIR) + "/" + new_name;
 }
 
+static bool build_module_path(char* buffer, size_t buffer_size, const char* root_path,
+                              const char* suffix) {
+    int written = snprintf(buffer, buffer_size, "%s%s", root_path, suffix);
+    if (written < 0 || static_cast<size_t>(written) >= buffer_size) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    return true;
+}
+
 /*
  * argv[1]: path of the module, such as /data/adb/modules/zygisk-sui
  */
@@ -256,8 +266,10 @@ static int sui_main(int argc, char** argv) {
     auto root_path = argv[1];
 
     char dex_path[PATH_MAX]{0};
-    strcpy(dex_path, root_path);
-    strcat(dex_path, "/sui.dex");
+    if (!build_module_path(dex_path, sizeof(dex_path), root_path, "/sui.dex")) {
+        PLOGE("build_module_path %s/sui.dex", root_path);
+        return EXIT_FAILURE;
+    }
 
     // Resolve and persist shell workdir before forking so root/shell servers share
     // the same directory from the first startup tick.

@@ -209,6 +209,7 @@ clean:
         env->ExceptionDescribe();
         env->ExceptionClear();
     }
+    env->DeleteLocalRef(systemClassLoader);
     env->DeleteLocalRef(classLoaderClass);
     if (jOptDir)
         env->DeleteLocalRef(jOptDir);
@@ -243,6 +244,7 @@ jclass Dex::findClass(JNIEnv* env, const char* name) {
     auto cls = (jclass)env->CallObjectMethod(dexClassLoader, findClassMethod, jName);
     if (env->ExceptionCheck())
         env->ExceptionClear();
+    env->DeleteLocalRef(jName);
     return cls;
 }
 

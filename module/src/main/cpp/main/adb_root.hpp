@@ -21,6 +21,9 @@
 #include <private/ScopedFd.h>
 #include <sys/mman.h>
 #include <cinttypes>
+#include <cstdio>
+#include <cerrno>
+#include <cstdlib>
 #include <selinux.h>
 #include <logging.h>
 #include <misc.h>
@@ -35,6 +38,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <android.h>
+#include <cstdarg>
 
 using namespace std::literals::string_view_literals;
 
@@ -60,6 +64,18 @@ struct attrs {
         }
     }
 };
+
+inline bool build_path(char* buffer, size_t buffer_size, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int written = vsnprintf(buffer, buffer_size, fmt, args);
+    va_end(args);
+    if (written < 0 || static_cast<size_t>(written) >= buffer_size) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    return true;
+}
 
 inline int getattrs(const char* file, attrs* attrs) {
     struct stat statbuf{};
@@ -206,8 +222,10 @@ inline int setup_adb_root_apex(const char* root_path, const char* adbd_wrapper,
 
     // Path of real of adbd in module folder
     char my_backup[PATH_MAX]{0};
-    strcpy(my_backup, root_path);
-    strcat(my_backup, "/bin/adbd_real");
+    if (!build_path(my_backup, sizeof(my_backup), "%s/bin/adbd_real", root_path)) {
+        PLOGE("build_path %s/bin/adbd_real", root_path);
+        return ERR_OTHER;
+    }
 
     if (copyfile(adbd, my_backup) != 0) {
         PLOGE("copyfile %s -> %s", adbd, my_backup);
@@ -248,11 +266,16 @@ inline int setup_adb_root_apex(const char* root_path, const char* adbd_wrapper,
         return ERR_OTHER;
     }
 
-    strcpy(path, versioned_adbd);
-    strcat(path, "/lib");
+    if (!build_path(path, sizeof(path),
 #ifdef __LP64__
-    strcat(path, "64");
+                    "%s/lib64",
+#else
+                    "%s/lib",
 #endif
+                    versioned_adbd)) {
+        PLOGE("build_path %s/lib", versioned_adbd);
+        return ERR_OTHER;
+    }
 
     ScopedReaddir lib(path);
     if (lib.IsBad()) {
@@ -317,21 +340,25 @@ inline int setup_adb_root_apex(const char* root_path, const char* adbd_wrapper,
             if (entry->d_name[0] == '.')
                 continue;
 
-            strcpy(source, versioned_adbd);
+            if (!build_path(source, sizeof(source),
 #ifdef __LP64__
-            strcat(source, "/lib64/");
+                            "%s/lib64/%s",
 #else
-            strcat(source, "/lib/");
+                            "%s/lib/%s",
 #endif
-            strcat(source, entry->d_name);
+                            versioned_adbd, entry->d_name)) {
+                PLOGE("build_path source %s", entry->d_name);
+                goto failed;
+            }
 
             if (getattrs(source, &lib_attr) != 0) {
                 goto failed;
             }
 
-            strcpy(target, lib_folder);
-            strcat(target, "/");
-            strcat(target, entry->d_name);
+            if (!build_path(target, sizeof(target), "%s/%s", lib_folder, entry->d_name)) {
+                PLOGE("build_path target %s", entry->d_name);
+                goto failed;
+            }
 
             if (setup_file(source, target, nullptr) != 0) {
                 LOGE("Failed to %s -> %s", source, target);
@@ -339,8 +366,10 @@ inline int setup_adb_root_apex(const char* root_path, const char* adbd_wrapper,
             }
         }
 
-        strcpy(target, lib_folder);
-        strcat(target, "/libsui_adbd_preload.so");
+        if (!build_path(target, sizeof(target), "%s/libsui_adbd_preload.so", lib_folder)) {
+            PLOGE("build_path %s/libsui_adbd_preload.so", lib_folder);
+            goto failed;
+        }
 
         if (setup_file(adbd_preload, target, &lib_attr) != 0) {
             LOGE("Failed to %s -> %s", adbd_preload, target);
@@ -376,6 +405,7 @@ inline int setup_adb_root_non_apex(const char* root_path, const char* adbd_wrapp
 
     file = "/system/bin/adbd";
     folder = "/system/bin";
+    data_adb_folder = "/data/adb";
 
     if (!is_dynamically_linked(file)) {
         LOGE("%s is not dynamically linked", file);
@@ -400,16 +430,20 @@ inline int setup_adb_root_non_apex(const char* root_path, const char* adbd_wrapp
     char target[PATH_MAX]{0};
 
     // mkdir $MODDIR/system/bin
-    strcpy(module_folder, root_path);
-    strcat(module_folder, "/system/bin");
+    if (!build_path(module_folder, sizeof(module_folder), "%s/system/bin", root_path)) {
+        PLOGE("build_path %s/system/bin", root_path);
+        return ERR_OTHER;
+    }
     if (mkdir(module_folder, folder_attr.mode) == -1 && errno != EEXIST) {
         PLOGE("mkdir %s", module_folder);
         return ERR_OTHER;
     }
 
     // $MODDIR/system/bin/adbd_wrapper -> $MODDIR/system/bin/adbd
-    strcpy(target, module_folder);
-    strcat(target, "/adbd");
+    if (!build_path(target, sizeof(target), "%s/adbd", module_folder)) {
+        PLOGE("build_path %s/adbd", module_folder);
+        return ERR_OTHER;
+    }
     if (copyfile(adbd_wrapper, target) != 0) {
         PLOGE("copyfile %s -> %s", adbd_wrapper, target);
         return ERR_OTHER;
@@ -420,8 +454,10 @@ inline int setup_adb_root_non_apex(const char* root_path, const char* adbd_wrapp
     }
 
     // /system/bin/adbd -> $MODDIR/system/bin/adbd_real
-    strcpy(target, module_folder);
-    strcat(target, "/adbd_real");
+    if (!build_path(target, sizeof(target), "%s/adbd_real", module_folder)) {
+        PLOGE("build_path %s/adbd_real", module_folder);
+        return ERR_OTHER;
+    }
     if (copyfile(file, target) != 0) {
         PLOGE("copyfile %s -> %s", file, target);
         return ERR_OTHER;
@@ -441,19 +477,26 @@ inline int setup_adb_root_non_apex(const char* root_path, const char* adbd_wrapp
     }
 
     // mkdir $MODDIR/system/lib(64)
-    strcpy(module_folder, root_path);
-    strcat(module_folder, "/system/lib");
+    if (!build_path(module_folder, sizeof(module_folder),
 #ifdef __LP64__
-    strcat(module_folder, "64");
+                    "%s/system/lib64",
+#else
+                    "%s/system/lib",
 #endif
+                    root_path)) {
+        PLOGE("build_path %s/system/lib", root_path);
+        return ERR_OTHER;
+    }
     if (mkdir(module_folder, folder_attr.mode) == -1 && errno != EEXIST) {
         PLOGE("mkdir %s", module_folder);
         return ERR_OTHER;
     }
 
     // $MODDIR/lib/libadbd_preload.so -> $MODDIR/system/lib(64)/libsui_adbd_preload.so
-    strcpy(target, module_folder);
-    strcat(target, "/libsui_adbd_preload.so");
+    if (!build_path(target, sizeof(target), "%s/libsui_adbd_preload.so", module_folder)) {
+        PLOGE("build_path %s/libsui_adbd_preload.so", module_folder);
+        return ERR_OTHER;
+    }
     if (copyfile(adbd_preload, target) != 0) {
         PLOGE("copyfile %s -> %s", adbd_preload, target);
         return ERR_OTHER;
@@ -498,12 +541,16 @@ static int setup_adb_root(const char* root_path) {
     freecon(curr_con);
 
     char adbd_wrapper[PATH_MAX]{0};
-    strcpy(adbd_wrapper, root_path);
-    strcat(adbd_wrapper, "/bin/adbd_wrapper");
+    if (!build_path(adbd_wrapper, sizeof(adbd_wrapper), "%s/bin/adbd_wrapper", root_path)) {
+        PLOGE("build_path %s/bin/adbd_wrapper", root_path);
+        return ERR_OTHER;
+    }
 
     char adbd_preload[PATH_MAX]{0};
-    strcpy(adbd_preload, root_path);
-    strcat(adbd_preload, "/lib/libadbd_preload.so");
+    if (!build_path(adbd_preload, sizeof(adbd_preload), "%s/lib/libadbd_preload.so", root_path)) {
+        PLOGE("build_path %s/lib/libadbd_preload.so", root_path);
+        return ERR_OTHER;
+    }
 
     if (android_get_device_api_level() >= __ANDROID_API_R__) {
         if (access("/apex/com.android.adbd/bin/adbd", F_OK) != 0) {

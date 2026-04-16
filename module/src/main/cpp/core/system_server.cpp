@@ -147,6 +147,8 @@ static bool installDex(JNIEnv* env, Dex* dexFile) {
         return false;
     }
 
+    dexFile->destroy(env);
+
     return true;
 }
 
