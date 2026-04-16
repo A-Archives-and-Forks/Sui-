@@ -70,6 +70,13 @@ import rikka.sui.util.UserHandleCompat;
 @SuppressWarnings("deprecation")
 public class SuiService extends Service<SuiUserServiceManager, SuiClientManager, SuiConfigManager> {
 
+    private static final int BRIDGE_TRANSACTION_CODE = ('_' << 24) | ('S' << 16) | ('U' << 8) | 'I';
+    private static final String BRIDGE_SERVICE_DESCRIPTOR = "android.app.IActivityManager";
+    private static final String BRIDGE_SERVICE_NAME = "activity";
+    private static final int BRIDGE_ACTION_GET_BINDER = 2;
+    private static final int SERVER_UID_ROOT = 0;
+    private static final int SERVER_UID_SHELL = 2000;
+
     private static SuiService instance;
     private static String filesPath;
     private static boolean shellMode = false;
@@ -78,6 +85,83 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
 
     public static SuiService getInstance() {
         return instance;
+    }
+
+    private static IBinder requestBinderFromBridge(int serverUid) {
+        IBinder bridgeService = android.os.ServiceManager.getService(BRIDGE_SERVICE_NAME);
+        if (bridgeService == null) {
+            return null;
+        }
+
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(BRIDGE_SERVICE_DESCRIPTOR);
+            data.writeInt(BRIDGE_ACTION_GET_BINDER);
+            if (serverUid == SERVER_UID_ROOT || serverUid == SERVER_UID_SHELL) {
+                data.writeInt(serverUid);
+            }
+            bridgeService.transact(BRIDGE_TRANSACTION_CODE, data, reply, 0);
+            reply.readException();
+            return reply.readStrongBinder();
+        } catch (Throwable e) {
+            LOGGER.w(e, "requestBinderFromBridge");
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    private void reloadShellServerConfig() {
+        IBinder shellBinder = requestBinderFromBridge(SERVER_UID_SHELL);
+        if (shellBinder == null) {
+            LOGGER.w("shell binder is null, skip synchronous shell config reload");
+            return;
+        }
+
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(ShizukuApiConstants.BINDER_DESCRIPTOR);
+            shellBinder.transact(ServerConstants.BINDER_TRANSACTION_reloadShellConfig, data, reply, 0);
+            reply.readException();
+        } catch (Throwable e) {
+            LOGGER.w(e, "reloadShellServerConfig");
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    private void restartUnconfiguredRunningAppsForDefaultShellTransition() {
+        java.util.Set<String> restartedPackages = new java.util.LinkedHashSet<>();
+        for (ClientRecord record : clientManager.getClients()) {
+            if (record.uid < 10000 || record.packageName == null) {
+                continue;
+            }
+            if (configManager.findExplicit(record.uid) != null) {
+                continue;
+            }
+            if (!restartedPackages.add(record.packageName)) {
+                continue;
+            }
+
+            try {
+                LOGGER.i("Force stopping %s to refresh binder after default shell transition", record.packageName);
+                long id = Binder.clearCallingIdentity();
+                try {
+                    ActivityManagerApis.forceStopPackageNoThrow(
+                            record.packageName, UserHandleCompat.getUserId(record.uid));
+                    getUserServiceManager().removeUserServicesForPackage(record.packageName);
+                    AppLaunchUtils.startAppAsUser(record.packageName, UserHandleCompat.getUserId(record.uid));
+                } finally {
+                    Binder.restoreCallingIdentity(id);
+                }
+            } catch (Throwable e) {
+                LOGGER.w(e, "Failed to restart unconfigured package %s", record.packageName);
+            }
+        }
     }
 
     public static boolean isShellMode() {
@@ -173,7 +257,9 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
                             BridgeServiceClient.syncUids(
                                     configManager.getHiddenUids(),
                                     getRootUidsWithSystem(),
-                                    configManager.getShellUids());
+                                    configManager.getDeniedUids(),
+                                    configManager.getShellUids(),
+                                    configManager.getDefaultPermissionFlags());
                         }
                     } else {
                         LOGGER.w("FAILURE: No response from bridge. Retrying in 1s...");
@@ -441,7 +527,11 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             // Push updated UID lists to system_server so BridgeService routes correctly
             if (!shellMode) {
                 BridgeServiceClient.syncUids(
-                        configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
+                        configManager.getHiddenUids(),
+                        getRootUidsWithSystem(),
+                        configManager.getDeniedUids(),
+                        configManager.getShellUids(),
+                        configManager.getDefaultPermissionFlags());
             }
 
             // Force kill the app if it requested permission and was granted Shell.
@@ -538,7 +628,11 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
 
             // Always sync UIDs to system_server when permission flags change
             BridgeServiceClient.syncUids(
-                    configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
+                    configManager.getHiddenUids(),
+                    getRootUidsWithSystem(),
+                    configManager.getDeniedUids(),
+                    configManager.getShellUids(),
+                    configManager.getDefaultPermissionFlags());
         }
     }
 
@@ -559,7 +653,11 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             LOGGER.i("uid %d is removed", uid);
             configManager.remove(uid);
             BridgeServiceClient.syncUids(
-                    configManager.getHiddenUids(), getRootUidsWithSystem(), configManager.getShellUids());
+                    configManager.getHiddenUids(),
+                    getRootUidsWithSystem(),
+                    configManager.getDeniedUids(),
+                    configManager.getShellUids(),
+                    configManager.getDefaultPermissionFlags());
         } else if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(action) && !replacing) {
             Uri uri = intent.getData();
             String packageName = (uri != null) ? uri.getSchemeSpecificPart() : null;
@@ -690,11 +788,42 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
                 if (targetMode != 0 && (targetMode & (targetMode - 1)) != 0) {
                     throw new IllegalArgumentException("Invalid targetMode: " + targetMode);
                 }
+                int oldDefaultMode = configManager.getDefaultPermissionFlags();
                 configManager.setDefaultPermissionFlags(targetMode);
+                if (!shellMode && targetMode == SuiConfig.FLAG_ALLOWED_SHELL) {
+                    reloadShellServerConfig();
+                }
+                if (!shellMode) {
+                    BridgeServiceClient.syncUids(
+                            configManager.getHiddenUids(),
+                            getRootUidsWithSystem(),
+                            configManager.getDeniedUids(),
+                            configManager.getShellUids(),
+                            configManager.getDefaultPermissionFlags());
+                    if (oldDefaultMode != targetMode
+                            && (oldDefaultMode == SuiConfig.FLAG_ALLOWED_SHELL
+                                    || targetMode == SuiConfig.FLAG_ALLOWED_SHELL)) {
+                        restartUnconfiguredRunningAppsForDefaultShellTransition();
+                    }
+                }
                 reply.writeNoException();
             } catch (Throwable e) {
                 LOGGER.w(e, "setDefaultPermissionFlags");
                 reply.writeException(new RuntimeException("Failed to set default permission flags", e));
+            }
+            return true;
+        }
+        if (code == ServerConstants.BINDER_TRANSACTION_reloadShellConfig) {
+            data.enforceInterface(ShizukuApiConstants.BINDER_DESCRIPTOR);
+            try {
+                if (!shellMode) {
+                    throw new IllegalStateException("reloadShellConfig is only available in shell mode");
+                }
+                configManager.reloadShellConfig();
+                reply.writeNoException();
+            } catch (Throwable e) {
+                LOGGER.w(e, "reloadShellConfig");
+                reply.writeException(new RuntimeException("Failed to reload shell config", e));
             }
             return true;
         }

@@ -28,6 +28,7 @@ import android.os.RemoteException;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import moe.shizuku.server.IShizukuService;
+import rikka.sui.server.SuiConfig;
 
 public class BridgeService {
 
@@ -43,6 +44,7 @@ public class BridgeService {
 
     private static final int RETRY_MAX = 3;
     private static final long RETRY_DELAY_MS = 1000;
+
     private static final IBinder.DeathRecipient DEATH_RECIPIENT_ROOT = () -> {
         rootServiceBinder = null;
         rootService = null;
@@ -155,7 +157,9 @@ public class BridgeService {
                     }
                 }
 
-                if (Bridge.isHidden(targetUid)) {
+                int permissionFlags = Bridge.getPermissionFlags(targetUid);
+
+                if (requestedServerUid == null && (permissionFlags & SuiConfig.FLAG_HIDDEN) != 0) {
                     return false;
                 }
 
@@ -165,15 +169,13 @@ public class BridgeService {
                     if (requestedServerUid != null) {
                         requestedBinder =
                                 requestedServerUid == SERVER_UID_ROOT ? rootServiceBinder : shellServiceBinder;
-                    } else if (Bridge.isRootAllowed(targetUid)) {
+                    } else if ((permissionFlags & SuiConfig.FLAG_ALLOWED) != 0) {
                         requestedBinder = rootServiceBinder;
-                    } else if (Bridge.isShellAllowed(targetUid)) {
+                    } else if ((permissionFlags & SuiConfig.FLAG_ALLOWED_SHELL) != 0) {
                         requestedBinder = shellServiceBinder;
                     } else {
-                        // Manager apps usually check via another way but fallback here if needed, just return root
-                        // service binder?
-                        // Wait, manager apps should probably get rootServiceBinder.
-                        // Let's assume non-allowed apps (like manager or checking state) get root binder.
+                        // Ask/deny still need the root service binder so the client can attach and receive
+                        // normal permission request or denial results. Hidden is handled above.
                         requestedBinder = rootServiceBinder;
                     }
 
@@ -220,7 +222,17 @@ public class BridgeService {
                     int[] hiddenUids = data.createIntArray();
                     int[] rootUids = data.createIntArray();
                     int[] shellUids = data.createIntArray();
-                    SystemProcess.updateUids(hiddenUids, rootUids, shellUids);
+                    int defaultFlags = 0;
+                    int[] deniedUids = new int[0];
+
+                    if (data.dataAvail() >= Integer.BYTES) {
+                        defaultFlags = data.readInt();
+                    }
+
+                    if (data.dataAvail() >= Integer.BYTES) {
+                        deniedUids = data.createIntArray();
+                    }
+                    SystemProcess.updateUids(hiddenUids, rootUids, deniedUids, shellUids, defaultFlags);
                     if (reply != null) {
                         reply.writeNoException();
                     }

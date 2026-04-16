@@ -57,6 +57,7 @@ public class RootBridgeDelegate {
             Parcel reply = Parcel.obtain();
             data.writeInterfaceToken("android.app.IActivityManager");
             data.writeInt(2); // BRIDGE_ACTION_GET_BINDER
+            data.writeInt(0); // request root server explicitly
             bridgeService.transact(('_' << 24) | ('S' << 16) | ('U' << 8) | 'I', data, reply, 0);
             reply.readException();
             IBinder rootBinder = reply.readStrongBinder();

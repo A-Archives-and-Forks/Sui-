@@ -140,6 +140,12 @@ public class SuiConfigManager extends ConfigManager {
         }
     }
 
+    public void reloadShellConfig() {
+        if (SuiService.isShellMode()) {
+            reloadShellConfigFromFile();
+        }
+    }
+
     private void syncUidsToShellFile() {
         if (SuiService.isShellMode()) return;
         try {
@@ -389,6 +395,22 @@ public class SuiConfigManager extends ConfigManager {
             List<Integer> uids = new ArrayList<>();
             for (SuiConfig.PackageEntry entry : config.packages) {
                 if (entry.uid >= 10000 && (entry.flags & SuiConfig.FLAG_ALLOWED) != 0) {
+                    uids.add(entry.uid);
+                }
+            }
+            int[] res = new int[uids.size()];
+            for (int i = 0; i < uids.size(); i++) {
+                res[i] = uids.get(i);
+            }
+            return res;
+        }
+    }
+
+    public int[] getDeniedUids() {
+        synchronized (this) {
+            List<Integer> uids = new ArrayList<>();
+            for (SuiConfig.PackageEntry entry : config.packages) {
+                if (entry.uid >= 10000 && (entry.flags & SuiConfig.FLAG_DENIED) != 0) {
                     uids.add(entry.uid);
                 }
             }

@@ -27,6 +27,7 @@ import android.os.Parcel;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import java.util.Arrays;
+import rikka.sui.server.SuiConfig;
 import rikka.sui.util.ParcelUtils;
 
 public final class SystemProcess {
@@ -34,7 +35,9 @@ public final class SystemProcess {
     private static final BridgeService SERVICE = new BridgeService();
     private static volatile int[] hiddenUids = new int[0];
     private static volatile int[] rootUids = new int[0];
+    private static volatile int[] deniedUids = new int[0];
     private static volatile int[] shellUids = new int[0];
+    private static volatile int defaultPermissionFlags = 0;
 
     private static boolean execActivityTransaction(
             @NonNull Binder binder, int code, Parcel data, Parcel reply, int flags) {
@@ -89,7 +92,7 @@ public final class SystemProcess {
             if (service != null) {
                 int[] uids = service.getHiddenUids();
                 LOGGER.d("syncing %d hidden uids to native and Java cache", uids.length);
-                updateUids(uids, new int[0], new int[0]);
+                updateUids(uids, new int[0], new int[0], new int[0], 0);
             } else {
                 LOGGER.w("IShizukuService is null in SystemProcess.main");
             }
@@ -98,20 +101,26 @@ public final class SystemProcess {
         }
     }
 
-    public static void updateUids(int[] hidden, int[] root, int[] shell) {
+    public static void updateUids(int[] hidden, int[] root, int[] denied, int[] shell, int defaultFlags) {
         if (hidden == null) hidden = new int[0];
         if (root == null) root = new int[0];
+        if (denied == null) denied = new int[0];
         if (shell == null) shell = new int[0];
 
         Arrays.sort(hidden);
         Arrays.sort(root);
+        Arrays.sort(denied);
         Arrays.sort(shell);
 
         hiddenUids = hidden;
         rootUids = root;
+        deniedUids = denied;
         shellUids = shell;
+        defaultPermissionFlags = defaultFlags & SuiConfig.MASK_PERMISSION;
 
-        LOGGER.d("syncing %d hidden, %d root, %d shell uids to native", hidden.length, root.length, shell.length);
+        LOGGER.d(
+                "syncing %d hidden, %d root, %d denied, %d shell uids to native, defaultFlags=%d",
+                hidden.length, root.length, denied.length, shell.length, defaultPermissionFlags);
         setHiddenUids(hidden);
     }
 
@@ -128,6 +137,15 @@ public final class SystemProcess {
     public static boolean isShellAllowed(int uid) {
         int[] uids = shellUids;
         return Arrays.binarySearch(uids, uid) >= 0;
+    }
+
+    public static boolean isDenied(int uid) {
+        int[] uids = deniedUids;
+        return Arrays.binarySearch(uids, uid) >= 0;
+    }
+
+    public static int getDefaultPermissionFlags() {
+        return defaultPermissionFlags;
     }
 
     @Keep

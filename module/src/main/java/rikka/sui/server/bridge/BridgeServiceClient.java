@@ -214,7 +214,7 @@ public class BridgeServiceClient {
         }
     }
 
-    public static void syncUids(int[] hiddenUids, int[] rootUids, int[] shellUids) {
+    public static void syncUids(int[] hiddenUids, int[] rootUids, int[] deniedUids, int[] shellUids, int defaultFlags) {
         IBinder bridgeService = ServiceManager.getService(BRIDGE_SERVICE_NAME);
         if (bridgeService == null) {
             return;
@@ -228,6 +228,8 @@ public class BridgeServiceClient {
             data.writeIntArray(hiddenUids);
             data.writeIntArray(rootUids);
             data.writeIntArray(shellUids);
+            data.writeInt(defaultFlags);
+            data.writeIntArray(deniedUids);
             bridgeService.transact(BRIDGE_TRANSACTION_CODE, data, reply, 0);
             reply.readException();
         } catch (Throwable e) {
