@@ -47,9 +47,13 @@
 
 namespace Manager {
 
-static jclass mainClass = nullptr;
-
 static bool installDex(JNIEnv* env, const char* appDataDir, Dex* dexFile) {
+    bool success = false;
+    jclass mainClass = nullptr;
+    jclass stringClass = nullptr;
+    jobjectArray args = nullptr;
+    jmethodID mainMethod = nullptr;
+
     int api = android_get_device_api_level();
     if (api <= 25) {
         char dexPath[PATH_MAX], oatDir[PATH_MAX];
@@ -70,31 +74,54 @@ static bool installDex(JNIEnv* env, const char* appDataDir, Dex* dexFile) {
     mainClass = dexFile->findClass(env, MANAGER_PROCESS_CLASSNAME);
     if (!mainClass) {
         LOGE("installDex: unable to find main class: %s", MANAGER_PROCESS_CLASSNAME);
-        return false;
+        goto cleanup;
     }
-    mainClass = (jclass)env->NewGlobalRef(mainClass);
 
-    auto mainMethod = env->GetStaticMethodID(mainClass, "main", "([Ljava/lang/String;)V");
+    mainMethod = env->GetStaticMethodID(mainClass, "main", "([Ljava/lang/String;)V");
     if (!mainMethod) {
         LOGE("installDex: unable to find main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    auto args = env->NewObjectArray(0, env->FindClass("java/lang/String"), nullptr);
+    stringClass = env->FindClass("java/lang/String");
+    if (!stringClass) {
+        LOGE("installDex: unable to find java/lang/String");
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        goto cleanup;
+    }
+
+    args = env->NewObjectArray(0, stringClass, nullptr);
+    if (!args) {
+        LOGE("installDex: unable to allocate argument array");
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+        goto cleanup;
+    }
 
     env->CallStaticVoidMethod(mainClass, mainMethod, args);
     if (env->ExceptionCheck()) {
         LOGE("installDex: exception in main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    dexFile->destroy(env);
+    success = true;
 
-    return true;
+cleanup:
+    if (args)
+        env->DeleteLocalRef(args);
+    if (stringClass)
+        env->DeleteLocalRef(stringClass);
+    if (mainClass)
+        env->DeleteLocalRef(mainClass);
+    dexFile->destroy(env);
+    return success;
 }
 
 struct InjectArgs {
@@ -103,9 +130,17 @@ struct InjectArgs {
     Dex* dexFile;
 };
 
+static void DestroyInjectArgs(InjectArgs* args) {
+    if (!args)
+        return;
+    if (args->appDataDir)
+        free(args->appDataDir);
+    delete args;
+}
+
 static void* InjectRoutine(void* data) {
     auto args = (InjectArgs*)data;
-    JNIEnv* env;
+    JNIEnv* env = nullptr;
     if (args->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
         LOGI("Async injection started");
         if (installDex(env, args->appDataDir, args->dexFile)) {
@@ -115,9 +150,7 @@ static void* InjectRoutine(void* data) {
         }
         args->vm->DetachCurrentThread();
     }
-    if (args->appDataDir)
-        free(args->appDataDir);
-    delete args;
+    DestroyInjectArgs(args);
     return nullptr;
 }
 
@@ -129,16 +162,41 @@ void main(JNIEnv* env, const char* appDataDir, Dex* dexFile) {
 
     LOGV("main: manager");
 
-    JavaVM* vm;
-    env->GetJavaVM(&vm);
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) != JNI_OK || !vm) {
+        LOGE("main: unable to get JavaVM");
+        return;
+    }
 
     auto args = new InjectArgs();
     args->vm = vm;
     args->appDataDir = appDataDir ? strdup(appDataDir) : nullptr;
     args->dexFile = dexFile;
 
+    pthread_attr_t attr;
+    int rc = pthread_attr_init(&attr);
+    if (rc != 0) {
+        LOGE("main: pthread_attr_init failed: %s", strerror(rc));
+        DestroyInjectArgs(args);
+        return;
+    }
+
+    rc = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (rc != 0) {
+        LOGE("main: pthread_attr_setdetachstate failed: %s", strerror(rc));
+        pthread_attr_destroy(&attr);
+        DestroyInjectArgs(args);
+        return;
+    }
+
     pthread_t t;
-    pthread_create(&t, nullptr, InjectRoutine, args);
+    rc = pthread_create(&t, &attr, InjectRoutine, args);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        LOGE("main: pthread_create failed: %s", strerror(rc));
+        DestroyInjectArgs(args);
+        return;
+    }
 
     LOGV("install dex (async) scheduled");
 }

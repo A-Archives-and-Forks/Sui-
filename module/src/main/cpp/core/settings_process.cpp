@@ -51,6 +51,13 @@ static jmethodID my_execTransactMethodID;
 static jint bindApplicationTransactionCode = -1;
 
 static bool installDex(JNIEnv* env, const char* appDataDir, Dex* dexFile) {
+    bool success = false;
+    jclass localMainClass = nullptr;
+    jclass loadedMainClass = nullptr;
+    jclass stringClass = nullptr;
+    jobjectArray args = nullptr;
+    jmethodID mainMethod = nullptr;
+
     int api = android_get_device_api_level();
     if (api <= 25) {
         char dexPath[PATH_MAX], oatDir[PATH_MAX];
@@ -68,43 +75,74 @@ static bool installDex(JNIEnv* env, const char* appDataDir, Dex* dexFile) {
     }
     dexFile->createClassLoader(env);
 
-    mainClass = dexFile->findClass(env, SETTINGS_PROCESS_CLASSNAME);
-    if (!mainClass) {
+    localMainClass = dexFile->findClass(env, SETTINGS_PROCESS_CLASSNAME);
+    if (!localMainClass) {
         LOGE("installDex: unable to find main class: %s", SETTINGS_PROCESS_CLASSNAME);
-        return false;
+        goto cleanup;
     }
-    mainClass = (jclass)env->NewGlobalRef(mainClass);
+    loadedMainClass = (jclass)env->NewGlobalRef(localMainClass);
+    env->DeleteLocalRef(localMainClass);
+    if (!loadedMainClass) {
+        LOGE("installDex: unable to create main class global ref");
+        goto cleanup;
+    }
 
-    auto mainMethod = env->GetStaticMethodID(mainClass, "main", "([Ljava/lang/String;)V");
+    mainMethod = env->GetStaticMethodID(loadedMainClass, "main", "([Ljava/lang/String;)V");
     if (!mainMethod) {
         LOGE("installDex: unable to find main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
     my_execTransactMethodID =
-        env->GetStaticMethodID(mainClass, "execTransact", "(Landroid/os/Binder;IJJI)Z");
+        env->GetStaticMethodID(loadedMainClass, "execTransact", "(Landroid/os/Binder;IJJI)Z");
     if (!my_execTransactMethodID) {
         LOGE("installDex: unable to find execTransact");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    auto args = env->NewObjectArray(0, env->FindClass("java/lang/String"), nullptr);
+    stringClass = env->FindClass("java/lang/String");
+    if (!stringClass) {
+        LOGE("installDex: unable to find java/lang/String");
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        goto cleanup;
+    }
 
-    env->CallStaticVoidMethod(mainClass, mainMethod, args);
+    args = env->NewObjectArray(0, stringClass, nullptr);
+    if (!args) {
+        LOGE("installDex: unable to allocate argument array");
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+        goto cleanup;
+    }
+
+    env->CallStaticVoidMethod(loadedMainClass, mainMethod, args);
     if (env->ExceptionCheck()) {
         LOGE("installDex: exception in main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    dexFile->destroy(env);
+    mainClass = loadedMainClass;
+    loadedMainClass = nullptr;
+    success = true;
 
-    return true;
+cleanup:
+    if (args)
+        env->DeleteLocalRef(args);
+    if (stringClass)
+        env->DeleteLocalRef(stringClass);
+    if (loadedMainClass)
+        env->DeleteGlobalRef(loadedMainClass);
+    dexFile->destroy(env);
+    return success;
 }
 
 /*

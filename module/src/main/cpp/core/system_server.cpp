@@ -85,48 +85,69 @@ static void setHiddenUids(JNIEnv* env, jclass, jintArray uids) {
 }
 
 static bool installDex(JNIEnv* env, Dex* dexFile) {
+    bool success = false;
+    jclass localMainClass = nullptr;
+    jclass loadedMainClass = nullptr;
+    jclass binderCls = nullptr;
+    jclass loadedBinderClass = nullptr;
+    jclass stringClass = nullptr;
+    jobjectArray args = nullptr;
+    jmethodID mainMethod = nullptr;
+    JNINativeMethod methods[] = {
+        {"setHiddenUids", "([I)V", (void*)setHiddenUids},
+    };
+
     if (android_get_device_api_level() < 27) {
         dexFile->setPre26Paths("/data/system/sui/" DEX_NAME, "/data/system/sui/oat");
     }
     dexFile->createClassLoader(env);
 
-    mainClass = dexFile->findClass(env, SYSTEM_PROCESS_CLASSNAME);
-    if (!mainClass) {
+    localMainClass = dexFile->findClass(env, SYSTEM_PROCESS_CLASSNAME);
+    if (!localMainClass) {
         LOGE("unable to find main class");
-        return false;
+        goto cleanup;
     }
-    mainClass = (jclass)env->NewGlobalRef(mainClass);
+    loadedMainClass = (jclass)env->NewGlobalRef(localMainClass);
+    env->DeleteLocalRef(localMainClass);
+    if (!loadedMainClass) {
+        LOGE("unable to create main class global ref");
+        goto cleanup;
+    }
 
-    JNINativeMethod methods[] = {
-        {"setHiddenUids", "([I)V", (void*)setHiddenUids},
-    };
-
-    if (env->RegisterNatives(mainClass, methods, sizeof(methods) / sizeof(methods[0])) < 0) {
+    if (env->RegisterNatives(loadedMainClass, methods, sizeof(methods) / sizeof(methods[0])) < 0) {
         LOGE("unable to register natives");
-        return false;
+        goto cleanup;
     }
 
-    auto mainMethod = env->GetStaticMethodID(mainClass, "main", "([Ljava/lang/String;)V");
+    mainMethod = env->GetStaticMethodID(loadedMainClass, "main", "([Ljava/lang/String;)V");
     if (!mainMethod) {
         LOGE("unable to find main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
     my_execTransactMethodID =
-        env->GetStaticMethodID(mainClass, "execTransact", "(Landroid/os/Binder;IJJI)Z");
+        env->GetStaticMethodID(loadedMainClass, "execTransact", "(Landroid/os/Binder;IJJI)Z");
     if (!my_execTransactMethodID) {
         LOGE("unable to find execTransact");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    jclass binderCls = env->FindClass("android/os/Binder");
+    binderCls = env->FindClass("android/os/Binder");
     if (binderCls) {
-        javaBinderClass = (jclass)env->NewGlobalRef(binderCls);
-        getCallingUidMethodID = env->GetStaticMethodID(javaBinderClass, "getCallingUid", "()I");
+        loadedBinderClass = (jclass)env->NewGlobalRef(binderCls);
+        if (!loadedBinderClass) {
+            env->DeleteLocalRef(binderCls);
+            LOGE("unable to create Binder class global ref");
+            goto cleanup;
+        }
+        if (!getCallingUidMethodID) {
+            getCallingUidMethodID =
+                env->GetStaticMethodID(loadedBinderClass, "getCallingUid", "()I");
+        }
         if (!getCallingUidMethodID) {
             env->ExceptionClear();
             LOGE("unable to find Binder.getCallingUid");
@@ -137,19 +158,49 @@ static bool installDex(JNIEnv* env, Dex* dexFile) {
         LOGE("unable to find android.os.Binder class");
     }
 
-    auto args = env->NewObjectArray(0, env->FindClass("java/lang/String"), nullptr);
+    stringClass = env->FindClass("java/lang/String");
+    if (!stringClass) {
+        LOGE("unable to find java/lang/String");
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        goto cleanup;
+    }
 
-    env->CallStaticVoidMethod(mainClass, mainMethod, args);
+    args = env->NewObjectArray(0, stringClass, nullptr);
+    if (!args) {
+        LOGE("unable to allocate argument array");
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+        goto cleanup;
+    }
+
+    env->CallStaticVoidMethod(loadedMainClass, mainMethod, args);
     if (env->ExceptionCheck()) {
         LOGE("unable to call main method");
         env->ExceptionDescribe();
         env->ExceptionClear();
-        return false;
+        goto cleanup;
     }
 
-    dexFile->destroy(env);
+    mainClass = loadedMainClass;
+    loadedMainClass = nullptr;
+    javaBinderClass = loadedBinderClass;
+    loadedBinderClass = nullptr;
+    success = true;
 
-    return true;
+cleanup:
+    if (args)
+        env->DeleteLocalRef(args);
+    if (stringClass)
+        env->DeleteLocalRef(stringClass);
+    if (loadedBinderClass)
+        env->DeleteGlobalRef(loadedBinderClass);
+    if (loadedMainClass)
+        env->DeleteGlobalRef(loadedMainClass);
+    dexFile->destroy(env);
+    return success;
 }
 
 /*

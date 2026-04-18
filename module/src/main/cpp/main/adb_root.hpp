@@ -84,6 +84,16 @@ inline int getattrs(const char* file, attrs* attrs) {
         return 1;
     }
 
+    if (attrs->context) {
+        if (attrs->is_malloced) {
+            free(attrs->context);
+        } else {
+            freecon(attrs->context);
+        }
+        attrs->context = nullptr;
+        attrs->is_malloced = false;
+    }
+
     if (getfilecon_raw(file, &attrs->context) < 0) {
         PLOGE("getfilecon %s", file);
         return 1;
@@ -92,6 +102,7 @@ inline int getattrs(const char* file, attrs* attrs) {
     attrs->uid = statbuf.st_uid;
     attrs->gid = statbuf.st_gid;
     attrs->mode = statbuf.st_mode;
+    attrs->is_malloced = false;
     return 0;
 }
 
