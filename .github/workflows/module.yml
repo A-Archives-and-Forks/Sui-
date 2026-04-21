@@ -155,7 +155,7 @@ jobs:
           echo "COUNT=$COUNT" >> $GITHUB_ENV
           echo "count=$COUNT" >> $GITHUB_OUTPUT
           echo "Version: v$COUNT"
-      - name: Update sui_zygisk.json in pages branch
+      - name: Update sui_zygisk.json and changelog in pages branch
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           set -e
@@ -168,29 +168,42 @@ jobs:
 
           ZIP_URL="https://github.com/${{ github.repository }}/releases/download/nightly/${ZIP_NAME}"
 
-          echo "Version: $VERSION"
-          echo "VersionCode (commit count): $VERSION_CODE"
-          echo "ZipURL: $ZIP_URL"
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
           git clone --depth=1 --branch pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} pages
           cd pages
+
+          cat > CHANGELOG.md <<EOF
+          # Nightly Build
+
+          - **Version:** \`${VERSION}\`
+          - **VersionCode:** \`${VERSION_CODE}\`
+          - **Commit:** \`${COMMIT_SHA}\`
+
+          ## Message
+
+          \`\`\`text
+          ${COMMIT_MESSAGE}
+          \`\`\`
+          EOF
 
           cat > sui_zygisk.json <<EOF
           {
             "versionCode": $VERSION_CODE,
             "version": "$VERSION",
             "zipUrl": "$ZIP_URL",
-            "changelog": "https://raw.githubusercontent.com/RikkaApps/Sui/master/template/magisk_module/CHANGELOG.md"
+            "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/pages/CHANGELOG.md"
           }
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add sui_zygisk.json
+          git add CHANGELOG.md sui_zygisk.json
           if ! git diff --staged --quiet; then
-            git commit -m "Update sui_zygisk.json (versionCode=$VERSION_CODE)"
+            git commit -m "Update pages metadata (versionCode=$VERSION_CODE)"
             git push
           else
-            echo "sui_zygisk.json remains unchanged, skip"
+            echo "No changes, skip"
           fi
