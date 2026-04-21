@@ -20,70 +20,156 @@
 #include <selinux.h>
 #include <logging.h>
 #include <cstring>
+#include <unistd.h>
 
 bool check() {
+    bool success = false;
+    char *curr_con = nullptr, *data_adb_con = nullptr;
+    char *sui_dir_con = nullptr, *seclabel_con = nullptr;
+
     if (selinux_check_access("u:r:adbd:s0", "u:r:adbd:s0", "process", "setcurrent", nullptr) != 0) {
         PLOGE("u:r:adbd:s0 u:r:adbd:s0 process setcurrent not allowed");
-        return false;
+        goto cleanup;
     }
 
-    char *curr_con = nullptr, *data_adb_con = nullptr;
     if (getcon(&curr_con) != 0) {
         PLOGE("getcon");
-        return false;
+        goto cleanup;
     }
 
     if (getfilecon_raw("/data/adb", &data_adb_con) != 0) {
         PLOGE("getfilecon_raw");
-        return false;
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:adbd:s0", curr_con, "process", "dyntransition", nullptr) != 0) {
         PLOGE("u:r:adbd:s0 %s process dyntransition not allowed", curr_con);
-        return false;
+        goto cleanup;
+    }
+
+    if (selinux_check_access(curr_con, curr_con, "process", "setsockcreate", nullptr) != 0) {
+        PLOGE("%s %s process setsockcreate not allowed", curr_con, curr_con);
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:system_server:s0", curr_con, "unix_stream_socket", "getopt",
                              nullptr) != 0) {
         PLOGE("u:r:system_server:s0 %s unix_stream_socket getopt not allowed", curr_con);
-        return false;
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:system_server:s0", curr_con, "unix_stream_socket", "getattr",
                              nullptr) != 0) {
         PLOGE("u:r:system_server:s0 %s unix_stream_socket getattr not allowed", curr_con);
-        return false;
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:system_server:s0", curr_con, "unix_stream_socket", "read",
                              nullptr) != 0) {
         PLOGE("u:r:system_server:s0 %s unix_stream_socket read not allowed", curr_con);
-        return false;
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:system_server:s0", curr_con, "unix_stream_socket", "write",
                              nullptr) != 0) {
         PLOGE("u:r:system_server:s0 %s unix_stream_socket write not allowed", curr_con);
-        return false;
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:init:s0", "u:r:adbd:s0", "process2", "nosuid_transition",
                              nullptr) != 0) {
         PLOGE("u:r:init:s0 u:r:adbd:s0 process2 nosuid_transition not allowed");
-        return false;
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "dir", "search", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s dir search not allowed", data_adb_con);
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "dir", "getattr", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s dir getattr not allowed", data_adb_con);
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "getattr", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s file getattr not allowed", data_adb_con);
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "open", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s file open not allowed", data_adb_con);
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "read", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s file read not allowed", data_adb_con);
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "execute", nullptr) != 0) {
-        PLOGE("u:r:adbd:s0 %s file execute not allowed", curr_con);
-        return false;
+        PLOGE("u:r:adbd:s0 %s file execute not allowed", data_adb_con);
+        goto cleanup;
+    }
+
+    if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "map", nullptr) != 0) {
+        PLOGE("u:r:adbd:s0 %s file map not allowed", data_adb_con);
+        goto cleanup;
     }
 
     if (selinux_check_access("u:r:adbd:s0", data_adb_con, "file", "execute_no_trans", nullptr) !=
         0) {
         PLOGE("u:r:adbd:s0 %s file execute_no_trans not allowed", data_adb_con);
-        return false;
+        goto cleanup;
     }
-    return true;
+
+    if (access("/data/adb/sui", F_OK) == 0) {
+        if (getfilecon_raw("/data/adb/sui", &sui_dir_con) != 0) {
+            PLOGE("getfilecon_raw /data/adb/sui");
+            goto cleanup;
+        }
+
+        if (selinux_check_access("u:r:adbd:s0", sui_dir_con, "dir", "search", nullptr) != 0) {
+            PLOGE("u:r:adbd:s0 %s dir search not allowed", sui_dir_con);
+            goto cleanup;
+        }
+
+        if (selinux_check_access("u:r:adbd:s0", sui_dir_con, "dir", "getattr", nullptr) != 0) {
+            PLOGE("u:r:adbd:s0 %s dir getattr not allowed", sui_dir_con);
+            goto cleanup;
+        }
+    }
+
+    if (access("/data/adb/sui/seclabel", F_OK) == 0) {
+        if (getfilecon_raw("/data/adb/sui/seclabel", &seclabel_con) != 0) {
+            PLOGE("getfilecon_raw /data/adb/sui/seclabel");
+            goto cleanup;
+        }
+
+        if (selinux_check_access("u:r:adbd:s0", seclabel_con, "file", "getattr", nullptr) != 0) {
+            PLOGE("u:r:adbd:s0 %s file getattr not allowed", seclabel_con);
+            goto cleanup;
+        }
+
+        if (selinux_check_access("u:r:adbd:s0", seclabel_con, "file", "open", nullptr) != 0) {
+            PLOGE("u:r:adbd:s0 %s file open not allowed", seclabel_con);
+            goto cleanup;
+        }
+
+        if (selinux_check_access("u:r:adbd:s0", seclabel_con, "file", "read", nullptr) != 0) {
+            PLOGE("u:r:adbd:s0 %s file read not allowed", seclabel_con);
+            goto cleanup;
+        }
+    }
+
+    success = true;
+
+cleanup:
+    freecon(seclabel_con);
+    freecon(sui_dir_con);
+    freecon(data_adb_con);
+    freecon(curr_con);
+    return success;
 }
 
 int main(int argc, char* argv[]) {

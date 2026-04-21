@@ -27,6 +27,9 @@
 
 using namespace std::literals::string_view_literals;
 
+static constexpr char kSuiAdbdRootSeclabelEnv[] = "SUI_ADBD_ROOT_SECLABEL";
+static constexpr auto kRootSeclabelArgPrefix = "--root_seclabel="sv;
+
 int main(int argc, char** argv) {
     const char* adbd_ld_preload;
     const char* adbd_real;
@@ -37,6 +40,8 @@ int main(int argc, char** argv) {
             root_seclabel_value[strcspn(root_seclabel_value, "\r\n")] = '\0';
         }
         fclose(fp);
+    } else {
+        PLOGE("fopen /data/adb/sui/seclabel");
     }
 
     auto apex = "/apex/"sv;
@@ -72,20 +77,33 @@ int main(int argc, char** argv) {
     setenv("LD_PRELOAD", new_ld_preload, 1);
     LOGD("LD_PRELOAD=%s", new_ld_preload);
 
-    auto root_seclabel = "--root_seclabel"sv;
+    bool root_seclabel_rewritten = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view argv_i{argv[i]};
-        if (argv_i.length() > root_seclabel.length() &&
-            argv_i.substr(0, root_seclabel.length()) == root_seclabel) {
+        if (argv_i.length() > kRootSeclabelArgPrefix.length() &&
+            argv_i.substr(0, kRootSeclabelArgPrefix.length()) == kRootSeclabelArgPrefix) {
             char seclabel_arg[128];
             size_t real_len =
                 strnlen(root_seclabel_value, sizeof(seclabel_arg) - strlen("--root_seclabel=") - 1);
             snprintf(seclabel_arg, sizeof(seclabel_arg), "--root_seclabel=%.*s", (int)real_len,
                      root_seclabel_value);
-            argv[i] = strdup(seclabel_arg);
+            char* replaced = strdup(seclabel_arg);
+            if (!replaced) {
+                PLOGE("strdup %s", seclabel_arg);
+                return EXIT_FAILURE;
+            }
+            argv[i] = replaced;
+            root_seclabel_rewritten = true;
             LOGD("root_seclabel -> %.*s", (int)real_len, root_seclabel_value);
         }
     }
 
-    return execv(adbd_real, argv);
+    if (root_seclabel_rewritten && setenv(kSuiAdbdRootSeclabelEnv, root_seclabel_value, 1) != 0) {
+        PLOGE("setenv %s", kSuiAdbdRootSeclabelEnv);
+        return EXIT_FAILURE;
+    }
+
+    execv(adbd_real, argv);
+    PLOGE("execv %s", adbd_real);
+    return EXIT_FAILURE;
 }

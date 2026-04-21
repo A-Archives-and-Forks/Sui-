@@ -117,7 +117,7 @@ inline int setattrs(const char* file, const attrs* attrs) {
         return 1;
     }
     if (chown(file, uid, gid) != 0) {
-        PLOGE("chmod %s", file);
+        PLOGE("chown %s", file);
         return 1;
     }
     if (setfilecon_raw(file, secontext) != 0) {
@@ -264,8 +264,9 @@ inline int setup_adb_root_apex(const char* root_path, const char* adbd_wrapper,
             continue;
 
         const char* version_string = entry->d_name + adbd_prefix.length();
-        int new_version = atoll(version_string);
+        uint64_t new_version = strtoull(version_string, nullptr, 10);
         if (new_version >= version) {
+            version = new_version;
             strncpy(versioned_adbd + apex.length(), d_name.data(), d_name.length());
             LOGI("Found versioned apex %s", versioned_adbd);
             found = true;
@@ -528,21 +529,79 @@ static int setup_adb_root(const char* root_path) {
     }
 
     char* curr_con = nullptr;
+    attrs data_adb_attr{};
     if (getcon(&curr_con) != 0) {
         PLOGE("getcon");
         return ERR_SELINUX;
     }
 
+    if (getattrs("/data/adb", &data_adb_attr) != 0) {
+        freecon(curr_con);
+        return ERR_OTHER;
+    }
+
     if (selinux_check_access("u:r:adbd:s0", curr_con, "process", "dyntransition", nullptr) != 0) {
         PLOGE("u:r:adbd:s0 %s process dyntransition not allowed", curr_con);
+        freecon(curr_con);
         return ERR_SELINUX;
     }
 
+    if (selinux_check_access(curr_con, curr_con, "process", "setsockcreate", nullptr) != 0) {
+        PLOGE("%s %s process setsockcreate not allowed", curr_con, curr_con);
+        freecon(curr_con);
+        return ERR_SELINUX;
+    }
+
+    constexpr const char* sui_dir = "/data/adb/sui";
+    if (mkdir(sui_dir, data_adb_attr.mode) == -1 && errno != EEXIST) {
+        PLOGE("mkdir %s", sui_dir);
+        freecon(curr_con);
+        return ERR_OTHER;
+    }
+    if (setattrs(sui_dir, &data_adb_attr) != 0) {
+        freecon(curr_con);
+        return ERR_OTHER;
+    }
+
+    attrs seclabel_attr = data_adb_attr;
+    seclabel_attr.context = strdup(data_adb_attr.context);
+    seclabel_attr.is_malloced = true;
+    seclabel_attr.mode = 0600;
+    if (!seclabel_attr.context) {
+        PLOGE("strdup /data/adb context");
+        freecon(curr_con);
+        return ERR_OTHER;
+    }
+
     if (FILE* fp = fopen("/data/adb/sui/seclabel.tmp", "we")) {
-        fputs(curr_con, fp);
-        fchmod(fileno(fp), 0600);
-        fclose(fp);
-        rename("/data/adb/sui/seclabel.tmp", "/data/adb/sui/seclabel");
+        int fd = fileno(fp);
+        bool ok = true;
+        if (fputs(curr_con, fp) == EOF) {
+            PLOGE("fputs /data/adb/sui/seclabel.tmp");
+            ok = false;
+        }
+        if (ok && fchmod(fd, 0600) != 0) {
+            PLOGE("fchmod /data/adb/sui/seclabel.tmp");
+            ok = false;
+        }
+        if (fclose(fp) != 0) {
+            PLOGE("fclose /data/adb/sui/seclabel.tmp");
+            ok = false;
+        }
+        if (ok && setattrs("/data/adb/sui/seclabel.tmp", &seclabel_attr) != 0) {
+            ok = false;
+        }
+        if (!ok) {
+            unlink("/data/adb/sui/seclabel.tmp");
+            freecon(curr_con);
+            return ERR_OTHER;
+        }
+        if (rename("/data/adb/sui/seclabel.tmp", "/data/adb/sui/seclabel") != 0) {
+            PLOGE("rename /data/adb/sui/seclabel.tmp");
+            unlink("/data/adb/sui/seclabel.tmp");
+            freecon(curr_con);
+            return ERR_OTHER;
+        }
     } else {
         PLOGE("fopen /data/adb/sui/seclabel");
         freecon(curr_con);
