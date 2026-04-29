@@ -83,8 +83,8 @@ jobs:
         with:
           name: mappings
           path: |-
-            "module/build/outputs/mapping/release"
-            "ui/build/outputs/mapping/release"
+            module/build/outputs/mapping/release
+            ui/build/outputs/mapping/release
       - name: Delete old Nightly assets
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
@@ -131,7 +131,7 @@ jobs:
           name: Nightly Build
           body_path: nightly-release-note.md
           prerelease: false
-          overwrite: true
+          overwrite_files: true
           files: |
             out/Sui-*-release.zip
             out/Sui-*-debug.zip
