@@ -76,11 +76,12 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
     private static final int BRIDGE_ACTION_GET_BINDER = 2;
     private static final int SERVER_UID_ROOT = 0;
     private static final int SERVER_UID_SHELL = 2000;
+    private static final long DELEGATED_PERMISSION_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000L;
 
     private static SuiService instance;
     private static String filesPath;
     private static boolean shellMode = false;
-    private final Map<String, android.os.IBinder> delegatedPermissionCallbacks =
+    private final Map<String, DelegatedPermissionCallback> delegatedPermissionCallbacks =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     public static SuiService getInstance() {
@@ -201,6 +202,59 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
     private final Object managerBinderLock = new Object();
     private final Logger flog = new Logger("Sui", "/cache/sui.log");
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private final class DelegatedPermissionCallback implements IBinder.DeathRecipient, Runnable {
+
+        private final String key;
+        private final android.os.IBinder binder;
+
+        private DelegatedPermissionCallback(String key, android.os.IBinder binder) {
+            this.key = key;
+            this.binder = binder;
+        }
+
+        @Override
+        public void binderDied() {
+            removeDelegatedPermissionCallback(key, this);
+        }
+
+        @Override
+        public void run() {
+            LOGGER.w("delegated permission callback timed out: %s", key);
+            removeDelegatedPermissionCallback(key, this);
+        }
+    }
+
+    private void removeDelegatedPermissionCallback(String key, DelegatedPermissionCallback callback) {
+        if (callback == null) {
+            return;
+        }
+        if (delegatedPermissionCallbacks.remove(key, callback)) {
+            destroyDelegatedPermissionCallback(callback);
+        }
+    }
+
+    private void destroyDelegatedPermissionCallback(DelegatedPermissionCallback callback) {
+        if (callback == null) {
+            return;
+        }
+        mainHandler.removeCallbacks(callback);
+        callback.binder.unlinkToDeath(callback, 0);
+    }
+
+    private void putDelegatedPermissionCallback(String key, android.os.IBinder binder) {
+        DelegatedPermissionCallback callback = new DelegatedPermissionCallback(key, binder);
+        try {
+            binder.linkToDeath(callback, 0);
+        } catch (RemoteException e) {
+            LOGGER.w(e, "delegated permission callback is already dead");
+            return;
+        }
+
+        DelegatedPermissionCallback old = delegatedPermissionCallbacks.put(key, callback);
+        destroyDelegatedPermissionCallback(old);
+        mainHandler.postDelayed(callback, DELEGATED_PERMISSION_CALLBACK_TIMEOUT_MS);
+    }
 
     private int waitForPackage(String packageName, boolean forever) {
         int uid;
@@ -507,15 +561,17 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
         }
 
         String key = requestUid + ":" + requestPid;
-        android.os.IBinder callback = delegatedPermissionCallbacks.remove(key);
+        DelegatedPermissionCallback callback = delegatedPermissionCallbacks.get(key);
         if (callback != null) {
+            removeDelegatedPermissionCallback(key, callback);
+            android.os.Parcel cbData = android.os.Parcel.obtain();
             try {
-                android.os.Parcel cbData = android.os.Parcel.obtain();
                 cbData.writeInt(allowed ? 1 : 0);
-                callback.transact(1, cbData, null, android.os.IBinder.FLAG_ONEWAY);
-                cbData.recycle();
+                callback.binder.transact(1, cbData, null, android.os.IBinder.FLAG_ONEWAY);
             } catch (Throwable e) {
                 LOGGER.w(e, "Failed to call delegated permission callback");
+            } finally {
+                cbData.recycle();
             }
         }
 
@@ -874,7 +930,9 @@ public class SuiService extends Service<SuiUserServiceManager, SuiClientManager,
             android.os.IBinder callback = data.readStrongBinder();
 
             String key = reqUid + ":" + reqPid;
-            delegatedPermissionCallbacks.put(key, callback);
+            if (callback != null) {
+                putDelegatedPermissionCallback(key, callback);
+            }
 
             int userId = UserHandleCompat.getUserId(reqUid);
             ClientRecord dummy = new ClientRecord(reqUid, reqPid, null, packageName, -1);

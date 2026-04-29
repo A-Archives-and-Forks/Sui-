@@ -50,11 +50,13 @@ public class RootBridgeDelegate {
             }
         };
 
+        Parcel data = null;
+        Parcel reply = null;
         try {
             IBinder bridgeService = ServiceManager.getService("activity");
             if (bridgeService == null) return;
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
+            data = Parcel.obtain();
+            reply = Parcel.obtain();
             data.writeInterfaceToken("android.app.IActivityManager");
             data.writeInt(2); // BRIDGE_ACTION_GET_BINDER
             data.writeInt(0); // request root server explicitly
@@ -62,7 +64,9 @@ public class RootBridgeDelegate {
             reply.readException();
             IBinder rootBinder = reply.readStrongBinder();
             data.recycle();
+            data = null;
             reply.recycle();
+            reply = null;
 
             if (rootBinder != null) {
                 data = Parcel.obtain();
@@ -75,11 +79,19 @@ public class RootBridgeDelegate {
                 rootBinder.transact(
                         ServerConstants.BINDER_TRANSACTION_requestPermissionFromShell, data, null, IBinder.FLAG_ONEWAY);
                 data.recycle();
+                data = null;
             } else {
                 LOGGER.e("root binder is null, cannot delegate.");
             }
         } catch (Throwable e) {
             LOGGER.e(e, "delegatePermissionConfirmationToRoot");
+        } finally {
+            if (data != null) {
+                data.recycle();
+            }
+            if (reply != null) {
+                reply.recycle();
+            }
         }
     }
 }
