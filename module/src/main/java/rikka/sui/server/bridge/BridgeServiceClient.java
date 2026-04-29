@@ -56,6 +56,12 @@ public class BridgeServiceClient {
         @Override
         public void binderDied() {
             binder.unlinkToDeath(this, 0);
+            synchronized (BridgeServiceClient.class) {
+                if (linkedBridgeService == binder && linkedDeathRecipient == this) {
+                    linkedBridgeService = null;
+                    linkedDeathRecipient = null;
+                }
+            }
 
             LOGGER.i("service %s is dead.", BRIDGE_SERVICE_NAME);
 
@@ -90,6 +96,23 @@ public class BridgeServiceClient {
     }
 
     private static Listener listener;
+    private static IBinder linkedBridgeService;
+    private static DeathRecipient linkedDeathRecipient;
+
+    private static void linkBridgeServiceDeathRecipient(IBinder bridgeService) throws Throwable {
+        synchronized (BridgeServiceClient.class) {
+            if (linkedBridgeService != null && linkedDeathRecipient != null) {
+                linkedBridgeService.unlinkToDeath(linkedDeathRecipient, 0);
+                linkedBridgeService = null;
+                linkedDeathRecipient = null;
+            }
+
+            DeathRecipient recipient = new DeathRecipient(bridgeService);
+            bridgeService.linkToDeath(recipient, 0);
+            linkedBridgeService = bridgeService;
+            linkedDeathRecipient = recipient;
+        }
+    }
 
     private static void sendToBridge(boolean isRestart) {
         IBinder bridgeService;
@@ -114,7 +137,7 @@ public class BridgeServiceClient {
         }
 
         try {
-            bridgeService.linkToDeath(new DeathRecipient(bridgeService), 0);
+            linkBridgeServiceDeathRecipient(bridgeService);
         } catch (Throwable e) {
             LOGGER.w(e, "linkToDeath");
             sendToBridge(false);
