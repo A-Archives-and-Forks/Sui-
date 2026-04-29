@@ -53,7 +53,7 @@ allprojects {
     }
 }
 
-def NDK_VERSION = "29.0.14206865"
+def NDK_VERSION = "30.0.14904198"
 idea.module {
     excludeDirs += file("out")
     resourceDirs += file("template")
