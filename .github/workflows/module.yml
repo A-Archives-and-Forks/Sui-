@@ -169,6 +169,7 @@ jobs:
           ZIP_URL="https://github.com/${{ github.repository }}/releases/download/nightly/${ZIP_NAME}"
 
           COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${GITHUB_SHA}"
           COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
           git clone --depth=1 --branch pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} pages
@@ -179,7 +180,7 @@ jobs:
 
           - **Version:** \`${VERSION}\`
           - **VersionCode:** \`${VERSION_CODE}\`
-          - **Commit:** \`${COMMIT_SHA}\`
+          - **Commit:** [\`${COMMIT_SHA}\`](${COMMIT_URL})
 
           ## Message
 
