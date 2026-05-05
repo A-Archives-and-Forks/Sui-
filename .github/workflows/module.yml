@@ -1,6 +1,8 @@
 name: Module
+
 permissions:
   contents: write
+
 on:
   push:
     branches:
@@ -15,248 +17,110 @@ on:
     branches:
       - main
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    if: ${{ !startsWith(github.event.head_commit.message, '[skip ci]') }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0
-      - name: Cache Gradle
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper/
-          key: gradle-${{ hashFiles('**/gradle-wrapper.properties') }}-${{ hashFiles('**/*.gradle*', '**/build.gradle*') }}
-          restore-keys: |
-            gradle-
-      - name: Set Gradle distribution URL
-        run: |
-          sed -i 's|mirrors.cloud.tencent.com/gradle/|services.gradle.org/distributions/|g' ./gradle/wrapper/gradle-wrapper.properties
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          dependency-graph: generate-and-submit
-          build-scan-publish: true
-          build-scan-terms-of-use-url: "https://gradle.com/terms-of-service"
-          build-scan-terms-of-use-agree: "yes"
-      - name: Accept Android licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-      - name: Configure Gradle properties
-        run: |
-          echo 'android.sdk.channel=3' >> gradle.properties
-          echo 'android.native.buildOutput=verbose' >> gradle.properties
-          echo 'org.gradle.caching=true' >> gradle.properties
-          echo 'org.gradle.parallel=true' >> gradle.properties
-      - name: Build with Gradle
-        id: buildWithGradle
-        run: ./gradlew zipDebug zipRelease --parallel --build-cache --max-workers=$(nproc)
-      - name: Prepare artifact
-        if: success()
-        id: prepareArtifact
-        run: |
-          releaseName=`ls out/Sui-*-release.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=releaseName::$releaseName"
-          debugName=`ls out/Sui-*-debug.zip | awk -F '(/|.zip)' '{print $2}'` && echo "::set-output name=debugName::$debugName"
-          unzip out/Sui-*-release.zip -d Sui-release
-          unzip out/Sui-*-debug.zip -d Sui-debug
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.prepareArtifact.outputs.releaseName }}
-          path: './Sui-release/*'
-      - name: Upload debug
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.prepareArtifact.outputs.debugName }}
-          path: './Sui-debug/*'
-      - name: Upload mappings
-        uses: actions/upload-artifact@v4
-        with:
-          name: mappings
-          path: |-
-            module/build/outputs/mapping/release
-            ui/build/outputs/mapping/release
-      - name: Delete old Nightly assets
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
+    name: Build module
+    uses: ./.github/workflows/build.yml
+    if: ${{ github.event_name != 'push' || github.event.head_commit == null || !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    with:
+      java_version: '21'
+    secrets: inherit
 
-          OWNER="${{ github.repository_owner }}"
-          REPO="${GITHUB_REPOSITORY#*/}"
+  release-nightly:
+    name: Update nightly release
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/release.yml
+    with:
+      release_type: nightly
+      nightly_tag: nightly
+      version_name: ${{ needs.build.outputs.version_name }}
+      version_code: ${{ needs.build.outputs.version_code }}
+      commit_sha: ${{ needs.build.outputs.commit_sha }}
+      commit_url: ${{ needs.build.outputs.commit_url }}
+      build_duration: ${{ needs.build.outputs.build_duration }}
+      release_zip_name: ${{ needs.build.outputs.release_zip_name }}
+      debug_zip_name: ${{ needs.build.outputs.debug_zip_name }}
+      release_sha256: ${{ needs.build.outputs.release_sha256 }}
+      debug_sha256: ${{ needs.build.outputs.debug_sha256 }}
+    secrets: inherit
 
-          echo "Find nightly release..."
-          RELEASE_JSON=$(gh api repos/$OWNER/$REPO/releases/tags/nightly 2>/dev/null || true)
-          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
+  release-tag:
+    name: Create tag release
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    uses: ./.github/workflows/release.yml
+    with:
+      release_type: tag
+      nightly_tag: nightly
+      version_name: ${{ needs.build.outputs.version_name }}
+      version_code: ${{ needs.build.outputs.version_code }}
+      commit_sha: ${{ needs.build.outputs.commit_sha }}
+      commit_url: ${{ needs.build.outputs.commit_url }}
+      build_duration: ${{ needs.build.outputs.build_duration }}
+      release_zip_name: ${{ needs.build.outputs.release_zip_name }}
+      debug_zip_name: ${{ needs.build.outputs.debug_zip_name }}
+      release_sha256: ${{ needs.build.outputs.release_sha256 }}
+      debug_sha256: ${{ needs.build.outputs.debug_sha256 }}
+    secrets: inherit
 
-          if [ -z "$RELEASE_ID" ]; then
-            echo "Nightly release doesn't exist, skip deletion"
-            exit 0
-          fi
+  ksu-release:
+    name: Sync KernelSU community release
+    needs:
+      - build
+      - release-nightly
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/ksu-release.yml
+    with:
+      main_repo: XiaoTong6666/Sui
+      ksu_target_repo: KernelSU-Modules-Repo/zygisk-sui
+      version_name: ${{ needs.build.outputs.version_name }}
+      version_code: ${{ needs.build.outputs.version_code }}
+      commit_sha: ${{ needs.build.outputs.commit_sha }}
+      commit_full_sha: ${{ needs.build.outputs.commit_full_sha }}
+      build_duration: ${{ needs.build.outputs.build_duration }}
+      release_zip_name: ${{ needs.build.outputs.release_zip_name }}
+      release_sha256: ${{ needs.build.outputs.release_sha256 }}
+    secrets: inherit
 
-          echo "Release ID: $RELEASE_ID"
-          echo "Get and delete all old assets (paginated)..."
+  ksu-release-tag:
+    name: Sync KernelSU community release for tag
+    needs:
+      - build
+      - release-tag
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    uses: ./.github/workflows/ksu-release.yml
+    with:
+      main_repo: XiaoTong6666/Sui
+      ksu_target_repo: KernelSU-Modules-Repo/zygisk-sui
+      version_name: ${{ needs.build.outputs.version_name }}
+      version_code: ${{ needs.build.outputs.version_code }}
+      commit_sha: ${{ needs.build.outputs.commit_sha }}
+      commit_full_sha: ${{ needs.build.outputs.commit_full_sha }}
+      build_duration: ${{ needs.build.outputs.build_duration }}
+      release_zip_name: ${{ needs.build.outputs.release_zip_name }}
+      release_sha256: ${{ needs.build.outputs.release_sha256 }}
+    secrets: inherit
 
-          ASSET_IDS=$(gh api --paginate repos/$OWNER/$REPO/releases/$RELEASE_ID/assets --jq '.[].id')
-
-          for ASSET_ID in $ASSET_IDS; do
-            echo "Delete asset $ASSET_ID"
-            gh api -X DELETE repos/$OWNER/$REPO/releases/assets/$ASSET_ID
-          done
-      - name: Prepare Nightly release note
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        run: |
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-          cat <<EOF > nightly-release-note.md
-          Nightly build
-          commit: ${GITHUB_SHA}  
-          message:
-          ${COMMIT_MESSAGE}
-          EOF
-      - name: Update Nightly
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        with:
-          tag_name: nightly
-          name: Nightly Build
-          body_path: nightly-release-note.md
-          prerelease: false
-          overwrite_files: true
-          files: |
-            out/Sui-*-release.zip
-            out/Sui-*-debug.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sync KernelSU community release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.KSU_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${GH_TOKEN:-}"
-
-          TARGET_REPO="KernelSU-Modules-Repo/zygisk-sui"
-          MAIN_REPO="XiaoTong6666/Sui"
-          MAIN_REPO_URL="https://github.com/${MAIN_REPO}"
-
-          RELEASE_ZIP=$(ls out/Sui-*-release.zip | head -n1)
-
-          TMP_DIR=$(mktemp -d)
-          unzip -q "$RELEASE_ZIP" module.prop -d "$TMP_DIR"
-
-          VERSION_NAME=$(grep '^version=' "$TMP_DIR/module.prop" | cut -d= -f2-)
-          VERSION_CODE=$(grep '^versionCode=' "$TMP_DIR/module.prop" | cut -d= -f2-)
-
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          COMMIT_FULL_SHA=$(git rev-parse HEAD)
-          COMMIT_URL="https://github.com/${MAIN_REPO}/commit/${COMMIT_FULL_SHA}"
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-
-          COMMUNITY_TAG="v${VERSION_CODE}-${COMMIT_SHA}"
-
-          cat > community-release-note.md <<EOF
-          同步 [自主仓库](${MAIN_REPO_URL}) 构建产物喵
-
-          - **Version:** \`${VERSION_NAME}\`
-          - **VersionCode:** \`${VERSION_CODE}\`
-          - **Commit:** [\`${COMMIT_SHA}\`](${COMMIT_URL})
-
-          ## Message
-
-          \`\`\`text
-          ${COMMIT_MESSAGE}
-          \`\`\`
-          EOF
-
-          if gh release view "$COMMUNITY_TAG" --repo "$TARGET_REPO" >/dev/null 2>&1; then
-            echo "Release $COMMUNITY_TAG already exists in $TARGET_REPO, skip."
-            exit 0
-          fi
-
-          gh release create "$COMMUNITY_TAG" "$RELEASE_ZIP" \
-            --repo "$TARGET_REPO" \
-            --title "$VERSION_NAME" \
-            --notes-file community-release-note.md
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          draft: false
-          prerelease: false
-          files: |
-            out/Sui-*-release.zip
-            out/Sui-*-debug.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get commit count
-        id: commit_count
-        run: |
-          COUNT=$(git rev-list --count HEAD)
-          echo "COUNT=$COUNT" >> $GITHUB_ENV
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
-          echo "Version: v$COUNT"
-      - name: Update sui_zygisk.json and changelog in pages branch
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        run: |
-          set -e
-
-          VERSION_CODE="${{ steps.commit_count.outputs.count }}"
-
-          RELEASE_ZIP=$(ls out/Sui-*-release.zip | head -n1)
-          VERSION=$(echo "$RELEASE_ZIP" | sed -E 's/.*Sui-(v[^_]+)_.*/\1/')
-          ZIP_NAME=$(basename "$RELEASE_ZIP")
-
-          ZIP_URL="https://github.com/${{ github.repository }}/releases/download/nightly/${ZIP_NAME}"
-
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${GITHUB_SHA}"
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-
-          git clone --depth=1 --branch pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} pages
-          cd pages
-
-          cat > CHANGELOG.md <<EOF
-          # Nightly Build
-
-          - **Version:** \`${VERSION}\`
-          - **VersionCode:** \`${VERSION_CODE}\`
-          - **Commit:** [\`${COMMIT_SHA}\`](${COMMIT_URL})
-
-          ## Message
-
-          \`\`\`text
-          ${COMMIT_MESSAGE}
-          \`\`\`
-          EOF
-
-          cat > sui_zygisk.json <<EOF
-          {
-            "versionCode": $VERSION_CODE,
-            "version": "$VERSION",
-            "zipUrl": "$ZIP_URL",
-            "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/pages/CHANGELOG.md"
-          }
-          EOF
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add CHANGELOG.md sui_zygisk.json
-          if ! git diff --staged --quiet; then
-            git commit -m "Update pages metadata (versionCode=$VERSION_CODE)"
-            git push
-          else
-            echo "No changes, skip"
-          fi
+  pages:
+    name: Update pages metadata
+    needs:
+      - build
+      - release-nightly
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/pages.yml
+    with:
+      nightly_tag: nightly
+      version_code: ${{ needs.build.outputs.version_code }}
+      version_short: ${{ needs.build.outputs.version_short }}
+      release_zip_name: ${{ needs.build.outputs.release_zip_name }}
+      commit_sha: ${{ needs.build.outputs.commit_sha }}
+      commit_url: ${{ needs.build.outputs.commit_url }}
+      build_duration: ${{ needs.build.outputs.build_duration }}
+      release_sha256: ${{ needs.build.outputs.release_sha256 }}
+    secrets: inherit
