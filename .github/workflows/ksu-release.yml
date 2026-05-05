@@ -80,7 +80,7 @@ jobs:
           test -f "$RELEASE_ZIP"
 
           {
-            echo "同步 [自主仓库](${MAIN_REPO_URL}) 构建产物喵"
+            echo "同步自 [主仓库](${MAIN_REPO_URL}) 构建产物喵"
             echo
             echo "- **Version:** \`${VERSION_NAME}\`"
             echo "- **VersionCode:** \`${VERSION_CODE}\`"

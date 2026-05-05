@@ -3,7 +3,10 @@ name: Pages Metadata
 on:
   workflow_call:
     inputs:
-      nightly_tag:
+      release_tag:
+        required: true
+        type: string
+      release_title:
         required: true
         type: string
       version_code:
@@ -49,7 +52,8 @@ jobs:
 
       - name: Update sui_zygisk.json and changelog in pages branch
         env:
-          NIGHTLY_TAG: ${{ inputs.nightly_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TITLE: ${{ inputs.release_title }}
           VERSION_CODE: ${{ inputs.version_code }}
           VERSION_SHORT: ${{ inputs.version_short }}
           RELEASE_ZIP_NAME: ${{ inputs.release_zip_name }}
@@ -60,14 +64,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          ZIP_URL="https://github.com/${{ github.repository }}/releases/download/${NIGHTLY_TAG}/${RELEASE_ZIP_NAME}"
-          CHANGELOG_URL="https://raw.githubusercontent.com/${{ github.repository }}/pages/CHANGELOG.md"
+          ZIP_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${RELEASE_ZIP_NAME}"
+          CHANGELOG_URL="https://raw.githubusercontent.com/${{ github.repository }}/pages/README.md"
 
           git clone --depth=1 --branch pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" pages
           cd pages
 
           {
-            echo "# Nightly Build"
+            echo "# ${RELEASE_TITLE}"
             echo
             echo "- **Version:** \`${VERSION_SHORT}\`"
             echo "- **VersionCode:** \`${VERSION_CODE}\`"
@@ -80,7 +84,7 @@ jobs:
             echo '```text'
             cat ../dist/metadata/commit-message.txt
             echo '```'
-          } > CHANGELOG.md
+          } > README.md
 
           cat > sui_zygisk.json <<EOF
           {
@@ -94,7 +98,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add CHANGELOG.md sui_zygisk.json
+          git add README.md sui_zygisk.json
 
           if ! git diff --staged --quiet; then
             git commit -m "Update pages metadata (versionCode=${VERSION_CODE})"
