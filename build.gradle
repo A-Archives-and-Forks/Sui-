@@ -90,7 +90,7 @@ spotless {
 
     java {
         target "**/src/*/java/**/*.java"
-        targetExclude "**/api/**", "**/build/**"
+        targetExclude "**/build/**"
 
         palantirJavaFormat()
         importOrder()
@@ -100,7 +100,7 @@ spotless {
 
     kotlin {
         target "**/src/*/kotlin/**/*.kt", "**/src/*/java/**/*.kt"
-        targetExclude "**/api/**", "**/build/**"
+        targetExclude "**/build/**"
         ktlint().editorConfigOverride([
                 "standard:backing-property-naming": "disabled",
                 "standard:no-wildcard-imports": "disabled",
@@ -111,7 +111,7 @@ spotless {
     }
     format "cpp", {
         target "**/src/main/cpp/**/*.c", "**/src/main/cpp/**/*.cpp", "**/src/main/cpp/**/*.h", "**/src/main/cpp/**/*.hpp"
-        targetExclude "**/api/**", "**/build/**"
+        targetExclude "**/build/**"
 
         def sdkDir = ""
         Properties properties = new Properties()
